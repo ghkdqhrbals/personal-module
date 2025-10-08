@@ -38,7 +38,7 @@ class NaverOauthService(
     }
 
     override fun requestAuthCode(response: HttpServletResponse) {
-        log().info(" aas dfasdf saf ${config.codePath}")
+        log().info("Initiating Naver OAuth authorization code request. codePath=${config.codePath}")
         val scopesEncoded = URLEncoder.encode(config.scopes.joinToString(" "), StandardCharsets.UTF_8)
         val uri = UriComponentsBuilder
             .fromHttpUrl("${config.codePath}")

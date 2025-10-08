@@ -42,7 +42,7 @@ class OauthProviderConfiguration {
                     if (!cfg.tokenPath.isNullOrEmpty()) tokenPath = cfg.tokenPath
                     if (!cfg.codePath.isNullOrEmpty()) codePath = cfg.codePath
                     if (!cfg.userInfoPath.isNullOrEmpty()) userInfoPath = cfg.userInfoPath
-                    if (!cfg.scopes.isNotEmpty()) scope(*cfg.scopes.toTypedArray())
+                    if (cfg.scopes.isNotEmpty()) scope(*cfg.scopes.toTypedArray())
                 }
             }
         }

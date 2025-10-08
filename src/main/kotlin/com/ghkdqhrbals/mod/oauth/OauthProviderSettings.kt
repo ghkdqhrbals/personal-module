@@ -15,7 +15,7 @@ data class OAuthConfig(
     val extra: Map<String, String>,
 )
 
-// 내부 빌더 (AutoConfiguration 에서�� 사용)
+// 내부 빌더 (AutoConfiguration 에서만 사용)
 class MutableOAuthConfig internal constructor(private val kind: OauthProviderKind) {
     var clientSecret: String? = null
     var redirectUri: String? = null

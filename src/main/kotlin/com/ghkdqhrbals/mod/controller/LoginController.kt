@@ -19,7 +19,7 @@ class LoginController(
 
     ) {
     @GetMapping("/login/google")
-    fun logingSuccess(response: HttpServletResponse) = google.requestAuthCode(response)
+    fun loginSuccess(response: HttpServletResponse) = google.requestAuthCode(response)
 
     @GetMapping("/login/oauth2/code/google")
     fun googlecallback(
@@ -29,9 +29,9 @@ class LoginController(
         @RequestParam(required = false) state: String?,
     ): String {
         val accessToken = google.getAccessToken(code ?: "")
-        log().info("Kakao access token: $accessToken")
+        log().info("Google access token: $accessToken")
         val userInfo = google.getUserInfo(accessToken!!)
-        log().info("Kakao user info: $userInfo")
+        log().info("Google user info: $userInfo")
         return "Login successful! User info: $userInfo"
     }
 
@@ -45,7 +45,7 @@ class LoginController(
     fun loginSuccess(response: HttpServletResponse) = kakao.requestAuthCode(response)
 
     @GetMapping("/login/naver")
-    fun loginSauccess(response: HttpServletResponse) = naver.requestAuthCode(response)
+    fun loginSuccess(response: HttpServletResponse) = naver.requestAuthCode(response)
 
     @GetMapping("/login/oauth2/code/kakao")
     fun kakaoCallback(
