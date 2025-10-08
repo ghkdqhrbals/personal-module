@@ -69,8 +69,8 @@ jobs:
       - name: Publish to GitHub Packages
         run: ./gradlew publish -PartifactVersion=${NEW_VERSION} --no-daemon
         env:
-          GITHUB_ACTOR: ${{ github.actor }}
-          GITHUB_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
+          PACKAGES_ACTOR: ${{ github.actor }}
+          PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
 
       - name: Create and push tag
         run: |
