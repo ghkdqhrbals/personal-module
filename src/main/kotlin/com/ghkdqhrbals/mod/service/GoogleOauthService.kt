@@ -68,7 +68,7 @@ class GoogleOauthService(
 
     override fun getAccessToken(code: String): String? {
         val tokenPath = config.tokenPath ?: error("tokenPath not configured for Google")
-        val clientId = config.clientId ?: error("restApiKey not configured for Google")
+        val clientId = config.clientId ?: error("clientId not configured for Google")
         val clientSecret = config.clientSecret ?: error("clientSecret not configured for Google")
         val form: MultiValueMap<String, String> = LinkedMultiValueMap<String, String>().apply {
             add("grant_type", "authorization_code")
