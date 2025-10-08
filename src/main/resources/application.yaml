@@ -1,0 +1,39 @@
+# log debug
+logging:
+  level:
+    com.ghkdqhrbals: debug
+
+spring:
+  config:
+    import: "aws-secretsmanager:arn:aws:secretsmanager:ap-northeast-2:879706081869:secret:personal/beta-sp3UfJ"
+  cloud:
+    aws:
+      region:
+        static: ap-northeast-2
+
+
+oauth:
+  providers:
+    kakao:
+      client-id: ...
+      client-secret: ...
+      redirect-uri: http://localhost:8080/login/oauth2/code/kakao
+      scopes:
+        - account_email
+    naver:
+      client-id: ...
+      client-secret: ...
+      redirect-uri: http://localhost:8080/login/oauth2/code/naver
+      scopes:
+          - name
+          - email
+          - profile_image
+          - age
+    google:
+      client-id: ...
+      client-secret: ...
+      redirect-uri: ...
+      scopes:
+        - openid
+        - email
+        - profile
