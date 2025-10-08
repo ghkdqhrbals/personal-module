@@ -70,7 +70,7 @@ jobs:
         run: ./gradlew publish -PartifactVersion=${NEW_VERSION} --no-daemon
         env:
           GITHUB_ACTOR: ${{ github.actor }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
 
       - name: Create and push tag
         run: |
@@ -90,7 +90,7 @@ jobs:
             - 유형: ${{ github.event.inputs.release_type }}
             - 버전: v${{ env.NEW_VERSION }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
 
       - name: Summary
         run: |
