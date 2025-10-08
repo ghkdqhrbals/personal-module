@@ -19,7 +19,7 @@ class LoginController(
 
     ) {
     @GetMapping("/login/google")
-    fun logingSuccess(response: HttpServletResponse) = google.requestAuthCode(response)
+    fun loginSuccess(response: HttpServletResponse) = google.requestAuthCode(response)
 
     @GetMapping("/login/oauth2/code/google")
     fun googlecallback(
