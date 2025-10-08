@@ -13,6 +13,11 @@ class OffsetDateTimeUtilsTest {
     private val offset = ZoneOffset.of(DEFAULT_OFFSET)
     private val offsetString = DEFAULT_OFFSET
 
+    @Test
+    fun `test_max`(){
+        val maxOffsetDateTime = maxOffsetDateTime()
+        assertEquals(OffsetDateTime.of(9999,12,31,23,59,59,0, ZoneOffset.UTC), maxOffsetDateTime)
+    }
     @Nested
     @DisplayName("minusMonthsFirstDay - Zone 기반 월 계산 후 UTC 반환")
     inner class MinusMonthsFirstDayZoneToUtc {
