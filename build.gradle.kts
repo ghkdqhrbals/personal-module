@@ -37,8 +37,8 @@ publishing {
             name = "GitHubPackages"
             url = uri("https://maven.pkg.github.com/ghkdqhrbals/personal-module")
             credentials {
-                username = System.getenv("GITHUB_ACTOR") ?: "ghkdqhrbals"
-                password = System.getenv("GITHUB_TOKEN") ?: System.getenv("GITHUB_PACKAGES_TOKEN") ?: runCatching { "git config --get github.package-token".runCommand() }.getOrNull()
+                username = System.getenv("PACKAGES_ACTOR") ?: "ghkdqhrbals"
+                password = System.getenv("PACKAGES_TOKEN") ?: System.getenv("GITHUB_PACKAGES_TOKEN") ?: runCatching { "git config --get github.package-token".runCommand() }.getOrNull()
             }
         }
     }
