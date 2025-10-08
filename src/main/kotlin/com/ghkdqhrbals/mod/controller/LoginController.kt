@@ -15,14 +15,13 @@ import org.springframework.web.bind.annotation.RestController
 class LoginController(
     private val kakao: KakaoOauthService,
     private val naver: NaverOauthService,
-    private val google: GoogleOauthService,
+    private val google: GoogleOauthService) {
 
-    ) {
     @GetMapping("/login/google")
-    fun loginSuccess(response: HttpServletResponse) = google.requestAuthCode(response)
+    fun googleLogin(response: HttpServletResponse) = google.requestAuthCode(response)
 
     @GetMapping("/login/oauth2/code/google")
-    fun googlecallback(
+    fun googleCallback(
         @RequestParam(required = false) code: String?,
         @RequestParam(required = false) error: String?,
         @RequestParam(required = false, name = "error_description") errorDescription: String?,
@@ -42,10 +41,10 @@ class LoginController(
     }
 
     @GetMapping("/login/kakao")
-    fun loginSuccess(response: HttpServletResponse) = kakao.requestAuthCode(response)
+    fun kakaoLogin(response: HttpServletResponse) = kakao.requestAuthCode(response)
 
     @GetMapping("/login/naver")
-    fun loginSuccess(response: HttpServletResponse) = naver.requestAuthCode(response)
+    fun naverLogin(response: HttpServletResponse) = naver.requestAuthCode(response)
 
     @GetMapping("/login/oauth2/code/kakao")
     fun kakaoCallback(
