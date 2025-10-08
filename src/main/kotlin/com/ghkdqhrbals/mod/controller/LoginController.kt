@@ -45,7 +45,7 @@ class LoginController(
     fun loginSuccess(response: HttpServletResponse) = kakao.requestAuthCode(response)
 
     @GetMapping("/login/naver")
-    fun loginSauccess(response: HttpServletResponse) = naver.requestAuthCode(response)
+    fun loginSuccess(response: HttpServletResponse) = naver.requestAuthCode(response)
 
     @GetMapping("/login/oauth2/code/kakao")
     fun kakaoCallback(
