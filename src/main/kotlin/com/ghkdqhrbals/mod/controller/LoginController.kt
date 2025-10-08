@@ -29,9 +29,9 @@ class LoginController(
         @RequestParam(required = false) state: String?,
     ): String {
         val accessToken = google.getAccessToken(code ?: "")
-        log().info("Kakao access token: $accessToken")
+        log().info("Google access token: $accessToken")
         val userInfo = google.getUserInfo(accessToken!!)
-        log().info("Kakao user info: $userInfo")
+        log().info("Google user info: $userInfo")
         return "Login successful! User info: $userInfo"
     }
 
