@@ -1,0 +1,3 @@
+package com.ghkdqhrbals.mod.controller
+
+class LoginControllerModuleMarker
