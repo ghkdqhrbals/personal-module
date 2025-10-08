@@ -85,8 +85,7 @@ class GoogleOauthService(
             .retrieve()
             .body(Map::class.java)
 
-        return tokenResponse?.get("access_token")?.toString()?.let {
-            return it
-        }?: throw BadRequestException("Failed to get access token")
+        return tokenResponse?.get("access_token")?.toString()
+            ?: throw BadRequestException("Failed to get access token")
     }
 }
