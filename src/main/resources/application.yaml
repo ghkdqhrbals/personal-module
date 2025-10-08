@@ -1,0 +1,12 @@
+# log debug
+logging:
+  level:
+    com.ghkdqhrbals: debug
+
+spring:
+  config:
+    import: "aws-secretsmanager:arn:aws:secretsmanager:ap-northeast-2:879706081869:secret:personal/beta-sp3UfJ"
+  cloud:
+    aws:
+      region:
+        static: ap-northeast-2
