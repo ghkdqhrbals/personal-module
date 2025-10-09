@@ -99,3 +99,12 @@ jobs:
           echo "- Release Type: ${{ github.event.inputs.release_type }}" >> $GITHUB_STEP_SUMMARY
           echo "- New Version: v${NEW_VERSION}" >> $GITHUB_STEP_SUMMARY
 
+      - name: Send GitHub Action trigger data to Slack workflow
+        if: always()
+        uses: ghkdqhrbals/slack-list@v1.0.12
+        with:
+          slack-webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          actor: ${{ github.actor }}
+          messages: "[\"Publish Result: ${{ success() && 'SUCCESS' || (cancelled() && 'CANCELLED' || 'FAILURE') }}\",\"Version: v${{ env.NEW_VERSION }}\",\"Release Type: ${{ github.event.inputs.release_type }}\",\"Create Release: ${{ github.event.inputs.create_release }}\"]"
+          message-title: 'Manual Publish Notification'
+          color: ${{ success() && '#3bb143' || '#ff4d4f' }}
