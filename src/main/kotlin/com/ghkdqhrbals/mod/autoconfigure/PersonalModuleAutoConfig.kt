@@ -1,6 +1,7 @@
-package com.ghkdqhrbals.mod.config
+package com.ghkdqhrbals.mod.autoconfigure
 
 
+import com.ghkdqhrbals.mod.config.OauthProvidersProperties
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.ComponentScan
 import org.springframework.context.annotation.Configuration
