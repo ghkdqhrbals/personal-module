@@ -1,7 +1,5 @@
 package com.ghkdqhrbals.mod.service
 
-import jakarta.servlet.http.HttpServletResponse
-
 abstract class OAuthService(
     val kind: OauthProviderKind
 ) {
