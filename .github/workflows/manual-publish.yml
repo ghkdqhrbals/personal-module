@@ -7,7 +7,7 @@ on:
         description: "버전 증가 유형 (major/minor/patch)"
         type: choice
         required: true
-        options: [major, minor, patch]
+        options: [patch, minor, major]
       create_release:
         description: "GitHub Release 생성 여부"
         type: boolean
