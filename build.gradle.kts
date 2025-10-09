@@ -70,7 +70,7 @@ repositories {
 
 tasks.named<Jar>("jar") {
     from("${layout.buildDirectory}/classes/java/main/META-INF") {
-        include("spring-configuration-metadata.json")
+        include("spring-configuration-metadata.json", "additional-spring-configuration-metadata.json")
     }
 }
 
