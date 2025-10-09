@@ -1,7 +1,3 @@
-import org.jetbrains.kotlin.gradle.internal.kapt.incremental.metadataDescriptor
-import org.jetbrains.kotlin.gradle.plugin.mpp.pm20.metadataElementsConfigurationName
-import org.springframework.boot.gradle.dsl.SpringBootExtension
-
 plugins {
     kotlin("jvm") version "1.9.25"
     kotlin("plugin.spring") version "1.9.25"
@@ -26,13 +22,27 @@ java {
     }
 }
 
+tasks.register<Jar>("bootMetadataJar") {
+    group = "build"
+    description = "Assemble Spring Boot configuration metadata JAR"
+
+    archiveClassifier.set("metadata")
+
+    // configuration metadata 파일 위치
+    val metaInfDir = layout.buildDirectory.dir("classes/java/main/META-INF")
+    from(metaInfDir) {
+        include("spring-configuration-metadata.json", "additional-spring-configuration-metadata.json")
+    }
+
+    dependsOn("compileJava") // metadata 파일 생성 후 실행되도록
+}
+
 publishing {
     publications {
         create<MavenPublication>("mavenJava") {
             from(components["java"])
-            artifact(tasks.named("bootMetadataJar"))
             groupId = "com.ghkdqhrbals"
-            artifactId = "mod"
+            artifactId = "tester"
             version = project.version.toString()
         }
     }
@@ -69,15 +79,7 @@ repositories {
     mavenCentral()
 }
 
-tasks.named<Jar>("jar") {
-    from("${layout.buildDirectory}/classes/java/main/META-INF") {
-        include("spring-configuration-metadata.json", "additional-spring-configuration-metadata.json")
-    }
-}
-
 dependencies {
-    annotationProcessor("org.springframework.boot:spring-boot-configuration-processor")
-    implementation("org.springframework.boot:spring-boot-autoconfigure")
     implementation("org.springframework.boot:spring-boot-starter")
     implementation("org.springframework.boot:spring-boot-starter-web")
     runtimeOnly("io.awspring.cloud:spring-cloud-aws-starter-secrets-manager:3.1.1")
@@ -86,7 +88,6 @@ dependencies {
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
-    runtimeOnly("org.springframework.boot:spring-boot-starter-thymeleaf")
 }
 
 kotlin {
