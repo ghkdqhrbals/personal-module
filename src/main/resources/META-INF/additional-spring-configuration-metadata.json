@@ -2,41 +2,53 @@
   "groups": [
     {
       "name": "oauth.providers.kakao",
-      "type": "com.ghkdqhrbals.mod.config.OauthProvidersProperties",
-      "sourceType": "com.ghkdqhrbals.mod.config.OauthProvidersProperties",
-      "description": "Kakao OAuth provider configuration."
-    },
-    {
-      "name": "oauth.providers.google",
-      "type": "com.ghkdqhrbals.mod.config.OauthProvidersProperties",
-      "description": "Google OAuth provider configuration."
+      "type": "com.ghkdqhrbals.mod.config.OauthProp",
+      "description": "카카오 OAuth 프로바이더 설정"
     },
     {
       "name": "oauth.providers.naver",
-      "type": "com.ghkdqhrbals.mod.config.OauthProvidersProperties",
-      "description": "Naver OAuth provider configuration."
+      "type": "com.ghkdqhrbals.mod.config.OauthProp",
+      "description": "네이버 OAuth 프로바이더 설정"
+    },
+    {
+      "name": "oauth.providers.google",
+      "type": "com.ghkdqhrbals.mod.config.OauthProp",
+      "description": "구글 OAuth 프로바이더 설정"
     }
   ],
   "properties": [
+    { "name": "oauth.providers.kakao.client-id",     "type": "java.lang.String", "description": "카카오 OAuth Client ID" },
+    { "name": "oauth.providers.kakao.client-secret", "type": "java.lang.String", "description": "카카오 OAuth Client Secret" },
+    { "name": "oauth.providers.kakao.redirect-uri",  "type": "java.lang.String", "description": "인증 완료 리다이렉트 URI" },
+    { "name": "oauth.providers.kakao.token-path",    "type": "java.lang.String", "description": "토큰 교환 엔드포인트 경로" },
+    { "name": "oauth.providers.kakao.code-path",     "type": "java.lang.String", "description": "인가 코드 발급 엔드포인트 경로" },
+    { "name": "oauth.providers.kakao.user-info-path","type": "java.lang.String", "description": "유저 정보 조회 엔드포인트 경로" },
+    { "name": "oauth.providers.kakao.scopes",        "type": "java.util.List<java.lang.String>", "description": "요청 스코프 목록" },
+
+    { "name": "oauth.providers.naver.client-id",     "type": "java.lang.String", "description": "네이버 OAuth Client ID" },
+    { "name": "oauth.providers.naver.client-secret", "type": "java.lang.String", "description": "네이버 OAuth Client Secret" },
+    { "name": "oauth.providers.naver.redirect-uri",  "type": "java.lang.String", "description": "인증 완료 리다이렉트 URI" },
+    { "name": "oauth.providers.naver.token-path",    "type": "java.lang.String", "description": "토큰 교환 엔드포인트 경로" },
+    { "name": "oauth.providers.naver.code-path",     "type": "java.lang.String", "description": "인가 코드 발급 엔드포인트 경로" },
+    { "name": "oauth.providers.naver.user-info-path","type": "java.lang.String", "description": "유저 정보 조회 엔드포인트 경로" },
+    { "name": "oauth.providers.naver.scopes",        "type": "java.util.List<java.lang.String>", "description": "요청 스코프 목록" },
+
+    { "name": "oauth.providers.google.client-id",     "type": "java.lang.String", "description": "구글 OAuth Client ID" },
+    { "name": "oauth.providers.google.client-secret", "type": "java.lang.String", "description": "구글 OAuth Client Secret" },
+    { "name": "oauth.providers.google.redirect-uri",  "type": "java.lang.String", "description": "인증 완료 리다이렉트 URI" },
+    { "name": "oauth.providers.google.token-path",    "type": "java.lang.String", "description": "토큰 교환 엔드포인트 경로" },
+    { "name": "oauth.providers.google.code-path",     "type": "java.lang.String", "description": "인가 코드 발급 엔드포인트 경로" },
+    { "name": "oauth.providers.google.user-info-path","type": "java.lang.String", "description": "유저 정보 조회 엔드포인트 경로" },
+    { "name": "oauth.providers.google.scopes",        "type": "java.util.List<java.lang.String>", "description": "요청 스코프 목록" }
+  ],
+  "hints": [
     {
-      "name": "oauth.providers.kakao.client-id",
-      "type": "java.lang.String",
-      "description": "Kakao API client ID."
-    },
-    {
-      "name": "oauth.providers.kakao.client-secret",
-      "type": "java.lang.String",
-      "description": "Kakao API client secret."
-    },
-    {
-      "name": "oauth.providers.kakao.redirect-uri",
-      "type": "java.lang.String",
-      "description": "Callback URI (ex: http://localhost:8080/login/oauth2/code/kakao)."
-    },
-    {
-      "name": "oauth.providers.kakao.scopes",
-      "type": "java.util.List<java.lang.String>",
-      "description": "Requested Kakao user permissions."
+      "name": "oauth.providers.keys",
+      "values": [
+        { "value": "kakao",  "description": "카카오" },
+        { "value": "naver",  "description": "네이버" },
+        { "value": "google", "description": "구글" }
+      ]
     }
   ]
 }

@@ -9,7 +9,7 @@ plugins {
 }
 
 group = "com.ghkdqhrbals"
-version = "0.0.2"
+version = "0.0.1"
 description = "mod"
 
 // 외부에서 -PartifactVersion 로 전달 시 우선 적용
@@ -22,8 +22,9 @@ java {
         languageVersion = JavaLanguageVersion.of(21)
     }
 }
+
 tasks.named<Jar>("jar") {
-    from("$buildDir/classes/java/main/META-INF") {
+    from("${layout.buildDirectory}/tmp/kapt3/classes/main/META-INF") {
         include("spring-configuration-metadata.json")
         include("additional-spring-configuration-metadata.json")
     }
@@ -45,7 +46,8 @@ publishing {
             url = uri("https://maven.pkg.github.com/ghkdqhrbals/personal-module")
             credentials {
                 username = System.getenv("PACKAGES_ACTOR") ?: "ghkdqhrbals"
-                password = System.getenv("PACKAGES_TOKEN") ?: System.getenv("GITHUB_PACKAGES_TOKEN") ?: runCatching { "git config --get github.package-token".runCommand() }.getOrNull()
+                password = System.getenv("PACKAGES_TOKEN") ?: System.getenv("GITHUB_PACKAGES_TOKEN")
+                        ?: runCatching { "git config --get github.package-token".runCommand() }.getOrNull()
             }
         }
     }
@@ -61,11 +63,7 @@ fun String.runCommand(): String {
         ""
     }
 }
-java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
-    }
-}
+java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }
 
 repositories {
     mavenCentral()
@@ -93,13 +91,9 @@ tasks.withType<Test> {
     useJUnitPlatform()
 }
 
-jacoco {
-    toolVersion = "0.8.12"
-}
+jacoco { toolVersion = "0.8.12" }
 
-tasks.test {
-    finalizedBy("jacocoTestReport")
-}
+tasks.test { finalizedBy("jacocoTestReport") }
 
 tasks.jacocoTestReport {
     dependsOn(tasks.test)

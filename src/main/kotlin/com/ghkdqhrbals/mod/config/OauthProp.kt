@@ -2,8 +2,7 @@ package com.ghkdqhrbals.mod.config
 
 import org.springframework.boot.context.properties.ConfigurationProperties
 
-
-data class OauthProviderProperties(
+data class OauthProp(
     var clientId: String = "",
     var clientSecret: String = "",
     var redirectUri: String = "",
@@ -15,5 +14,5 @@ data class OauthProviderProperties(
 
 @ConfigurationProperties(prefix = "oauth")
 data class OauthProvidersProperties(
-    var providers: Map<String, OauthProviderProperties> = emptyMap()
+    var providers: Map<String, OauthProp> = emptyMap()
 )
