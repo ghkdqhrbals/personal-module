@@ -105,6 +105,10 @@ jobs:
         with:
           slack-webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
           actor: ${{ github.actor }}
-          messages: "[\"Publish Result: ${{ success() && 'SUCCESS' || (cancelled() && 'CANCELLED' || 'FAILURE') }}\",\"Version: v${{ env.NEW_VERSION }}\",\"Release Type: ${{ github.event.inputs.release_type }}\",\"Create Release: ${{ github.event.inputs.create_release }}\"]"
+          messages: >
+            ["Publish Result: ${{ job.status == 'success' && 'SUCCESS' || (job.status == 'cancelled' && 'CANCELLED' || 'FAILURE') }}",
+             "Version: v${{ env.NEW_VERSION }}",
+             "Release Type: ${{ github.event.inputs.release_type }}",
+             "Create Release: ${{ github.event.inputs.create_release }}"]
           message-title: 'Manual Publish Notification'
-          color: ${{ success() && '#3bb143' || '#ff4d4f' }}
+          color: ${{ job.status == 'success' && '#3bb143' || (job.status == 'cancelled' && '#ffaa00' || '#ff4d4f') }}
