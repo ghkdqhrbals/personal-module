@@ -28,7 +28,7 @@ class NaverOauthService(
             .queryParam("client_id", config.clientId)
             .queryParam("redirect_uri", config.redirectUri)
             .queryParam("response_type", "code")
-            .queryParam("state", RandomUtils.generate(8))
+            .queryParam("state", state ?: RandomUtils.generate(8))
             .queryParam("scope", scopesEncoded)
             .build(true)
             .toUriString()
