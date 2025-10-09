@@ -5,7 +5,7 @@ logging:
 
 spring:
   config:
-    import: "aws-secretsmanager:arn:aws:secretsmanager:ap-northeast-2:879706081869:secret:personal/beta-sp3UfJ"
+    import: "optional:aws-secretsmanager:arn:aws:secretsmanager:ap-northeast-2:879706081869:secret:personal/beta-sp3UfJ"
   cloud:
     aws:
       region:
