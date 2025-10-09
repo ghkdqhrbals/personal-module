@@ -25,7 +25,7 @@ java {
 tasks.named<Jar>("jar") {
     from("$buildDir/classes/java/main/META-INF") {
         include("spring-configuration-metadata.json")
-        include("additional-spring-configuration-metadata.json")
+//        include("additional-spring-configuration-metadata.json")
     }
 }
 
