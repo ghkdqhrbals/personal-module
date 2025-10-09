@@ -1,8 +1,4 @@
-package com.ghkdqhrbals.mod.config;
-
-import org.springframework.boot.context.properties.ConfigurationProperties;
-import java.util.List;
-import java.util.Map;
+package com.ghkdqhrbals.mod;
 
 import java.util.List;
 
@@ -130,7 +126,6 @@ public class OauthProviderProperties {
      */
     private List<String> scopes = List.of();
 
-    // Getters & Setters
     public String getClientId() { return clientId; }
     public void setClientId(String clientId) { this.clientId = clientId; }
 
