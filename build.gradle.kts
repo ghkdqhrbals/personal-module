@@ -21,20 +21,11 @@ java {
         languageVersion = JavaLanguageVersion.of(21)
     }
 }
-
-tasks.register<Jar>("bootMetadataJar") {
-    group = "build"
-    description = "Assemble Spring Boot configuration metadata JAR"
-
-    archiveClassifier.set("metadata")
-
-    // configuration metadata 파일 위치
-    val metaInfDir = layout.buildDirectory.dir("classes/java/main/META-INF")
-    from(metaInfDir) {
-        include("spring-configuration-metadata.json", "additional-spring-configuration-metadata.json")
+tasks.named<Jar>("jar") {
+    from("$buildDir/classes/java/main/META-INF") {
+        include("spring-configuration-metadata.json")
+        include("additional-spring-configuration-metadata.json")
     }
-
-    dependsOn("compileJava") // metadata 파일 생성 후 실행되도록
 }
 
 publishing {
@@ -42,7 +33,7 @@ publishing {
         create<MavenPublication>("mavenJava") {
             from(components["java"])
             groupId = "com.ghkdqhrbals"
-            artifactId = "tester"
+            artifactId = "mod"
             version = project.version.toString()
         }
     }
