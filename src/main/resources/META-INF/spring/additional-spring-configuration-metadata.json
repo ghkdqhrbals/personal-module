@@ -1,0 +1,42 @@
+{
+  "groups": [
+    {
+      "name": "oauth.providers.kakao",
+      "type": "com.ghkdqhrbals.mod.config.OauthProvidersProperties",
+      "sourceType": "com.ghkdqhrbals.mod.config.OauthProvidersProperties",
+      "description": "Kakao OAuth provider configuration"
+    },
+    {
+      "name": "oauth.providers.google",
+      "type": "com.ghkdqhrbals.mod.config.OauthProvidersProperties",
+      "description": "Google OAuth provider configuration"
+    },
+    {
+      "name": "oauth.providers.naver",
+      "type": "com.ghkdqhrbals.mod.config.OauthProvidersProperties",
+      "description": "Naver OAuth provider configuration"
+    }
+  ],
+  "properties": [
+    {
+      "name": "oauth.providers.kakao.client-id",
+      "type": "java.lang.String",
+      "description": "Kakao API client ID"
+    },
+    {
+      "name": "oauth.providers.kakao.client-secret",
+      "type": "java.lang.String",
+      "description": "Kakao API client secret"
+    },
+    {
+      "name": "oauth.providers.kakao.redirect-uri",
+      "type": "java.lang.String",
+      "description": "Callback URI (ex: http://localhost:8080/login/oauth2/code/kakao)"
+    },
+    {
+      "name": "oauth.providers.kakao.scopes",
+      "type": "java.util.List<java.lang.String>",
+      "description": "Requested Kakao user permissions"
+    }
+  ]
+}
