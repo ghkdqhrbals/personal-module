@@ -1,3 +1,7 @@
+import org.jetbrains.kotlin.gradle.internal.kapt.incremental.metadataDescriptor
+import org.jetbrains.kotlin.gradle.plugin.mpp.pm20.metadataElementsConfigurationName
+import org.springframework.boot.gradle.dsl.SpringBootExtension
+
 plugins {
     kotlin("jvm") version "1.9.25"
     kotlin("plugin.spring") version "1.9.25"
@@ -62,6 +66,12 @@ java {
 
 repositories {
     mavenCentral()
+}
+
+tasks.named<Jar>("jar") {
+    from("${layout.buildDirectory}/classes/java/main/META-INF") {
+        include("spring-configuration-metadata.json")
+    }
 }
 
 dependencies {
