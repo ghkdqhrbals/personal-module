@@ -26,7 +26,7 @@ java {
 tasks.named<Jar>("jar") {
     from("${layout.buildDirectory}/tmp/kapt3/classes/main/META-INF") {
         include("spring-configuration-metadata.json")
-//        include("additional-spring-configuration-metadata.json")
+        include("additional-spring-configuration-metadata.json")
     }
 }
 
@@ -70,7 +70,9 @@ repositories {
 }
 
 dependencies {
-    annotationProcessor("org.springframework.boot:spring-boot-configuration-processor")
+    // thymeleaf
+    runtimeOnly("org.springframework.boot:spring-boot-starter-thymeleaf")
+    kapt("org.springframework.boot:spring-boot-configuration-processor")
     implementation("org.springframework.boot:spring-boot-starter")
     implementation("org.springframework.boot:spring-boot-starter-web")
     runtimeOnly("io.awspring.cloud:spring-cloud-aws-starter-secrets-manager:3.1.1")
