@@ -91,6 +91,9 @@ class AuthController(
 
 run this module directly and acess [http://localhost:8080/oauth2](http://localhost:8080/oauth2)
 
+<img width="1190" height="754" alt="image" src="https://github.com/user-attachments/assets/fea0df4a-83d0-4de7-a5e9-60c043824a4b" />
+
+
 > For your safety, please use secure vault service (ex. AWS Secrets Manager, HashiCorp Vault, Doppler, etc.)
 
 ## After v0.2.0 we will ...
