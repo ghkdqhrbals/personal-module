@@ -1,4 +1,4 @@
-# mod (OAuth + DateTime Utility Module) v0.2.0
+# mod (OAuth + DateTime Utility Module)
 
 This module provides an **OAuth provider integration module** that can be reused in Spring Boot applications (supports Kakao / Naver / Google).
 
