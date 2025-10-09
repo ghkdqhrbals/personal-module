@@ -25,7 +25,7 @@ class RestClientConfiguration {
         return RestClient.builder()
             .requestFactory(buffering)
             .requestInterceptors { it.add(loggingInterceptor()) }
-            .defaultStatusHandler({ true }) { _, _ -> }
+//            .defaultStatusHandler({ true }) { _, _ -> }
             .build()
     }
 

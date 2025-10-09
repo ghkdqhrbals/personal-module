@@ -18,7 +18,11 @@ class LoginController(
     private val google: GoogleOauthService) {
 
     @GetMapping("/login/google")
-    fun googleLogin(response: HttpServletResponse) = google.requestAuthCode(response)
+    fun googleLogin(response: HttpServletResponse) = response.sendRedirect(google.buildAuthorizationUrl())
+    @GetMapping("/logout/google")
+    fun googleLogout(@RequestParam accessToken: String) = google.revoke(accessToken)
+    @GetMapping("/userinfo/google")
+    fun googleUserInfo(@RequestParam accessToken: String) = google.fetchUserInfo(accessToken)
 
     @GetMapping("/login/oauth2/code/google")
     fun googleCallback(
@@ -27,24 +31,22 @@ class LoginController(
         @RequestParam(required = false, name = "error_description") errorDescription: String?,
         @RequestParam(required = false) state: String?,
     ): String {
-        val accessToken = google.getAccessToken(code ?: "")
-        log().info("Google access token: $accessToken")
-        val userInfo = google.getUserInfo(accessToken!!)
-        log().info("Google user info: $userInfo")
-        return "Login successful! User info: $userInfo"
-    }
-
-    @GetMapping("/logout/google")
-    fun googleLogout(@RequestParam accessToken: String): String {
-        google.disconnect(accessToken)
-        return "Google logout successful"
+        return google.exchangeToken(code ?: "") ?: throw IllegalStateException("Failed to get access token")
     }
 
     @GetMapping("/login/kakao")
-    fun kakaoLogin(response: HttpServletResponse) = kakao.requestAuthCode(response)
+    fun kakaoLogin(response: HttpServletResponse) = response.sendRedirect(kakao.buildAuthorizationUrl())
+    @GetMapping("/logout/kakao")
+    fun kakaoLogout(@RequestParam accessToken: String) = kakao.revoke(accessToken)
+    @GetMapping("/userinfo/kakao")
+    fun kakaoUserInfo(@RequestParam accessToken: String) = kakao.fetchUserInfo(accessToken)
 
     @GetMapping("/login/naver")
-    fun naverLogin(response: HttpServletResponse) = naver.requestAuthCode(response)
+    fun naverLogin(response: HttpServletResponse) = response.sendRedirect(naver.buildAuthorizationUrl())
+    @GetMapping("/logout/naver")
+    fun naverLogout(@RequestParam accessToken: String) = naver.revoke(accessToken)
+    @GetMapping("/userinfo/naver")
+    fun naverUserInfo(@RequestParam accessToken: String) = naver.fetchUserInfo(accessToken)
 
     @GetMapping("/login/oauth2/code/kakao")
     fun kakaoCallback(
@@ -53,23 +55,7 @@ class LoginController(
         @RequestParam(required = false, name = "error_description") errorDescription: String?,
         @RequestParam(required = false) state: String?,
     ): String {
-        val accessToken = kakao.getAccessToken(code ?: "")
-        log().info("Kakao access token: $accessToken")
-        val userInfo = kakao.getUserInfo(accessToken!!)
-        log().info("Kakao user info: $userInfo")
-        return "Login successful! User info: $userInfo"
-    }
-
-    @GetMapping("/logout/kakao")
-    fun kakaoLogout(@RequestParam accessToken: String): String {
-        kakao.disconnect(accessToken)
-        return "Kakao logout successful"
-    }
-
-    @GetMapping("/logout/naver")
-    fun naverLogout(@RequestParam accessToken: String): String {
-        naver.disconnect(accessToken)
-        return "Naver logout successful"
+        return kakao.exchangeToken(code ?: "") ?: throw IllegalStateException("Failed to get access token")
     }
 
     @GetMapping("/login/oauth2/code/naver")
@@ -79,10 +65,6 @@ class LoginController(
         @RequestParam(required = false, name = "error_description") errorDescription: String?,
         @RequestParam(required = false) state: String?,
     ): String {
-        val accessToken = naver.getAccessToken(code ?: "")
-        log().info("Naver access token: $accessToken")
-        val userInfo = naver.getUserInfo(accessToken!!)
-        log().info("Naver user info: $userInfo")
-        return "Login successful! User info: $userInfo"
+        return naver.exchangeToken(code ?: "") ?: throw IllegalStateException("Failed to get access token")
     }
 }

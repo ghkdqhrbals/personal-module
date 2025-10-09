@@ -18,10 +18,25 @@ import java.nio.charset.StandardCharsets
 class GoogleOauthService(
     private val client: RestClient,
     private val registry: OauthProviderRegistry,
-): OAuthService {
+): OAuthService(OauthProviderKind.GOOGLE) {
+    override fun buildAuthorizationUrl(state: String?): String {
+        val cfg = registry.require(providerKind())
+        val scopesEncoded = URLEncoder.encode(cfg.scopes.joinToString(" "), StandardCharsets.UTF_8)
+        val uri = UriComponentsBuilder
+            .fromHttpUrl("${cfg.codePath}")
+            .queryParam("client_id", cfg.clientId)
+            .queryParam("redirect_uri", cfg.redirectUri)
+            .queryParam("response_type", "code")
+            .queryParam("state", state?:RandomUtils.generate(8))
+            .queryParam("scope", scopesEncoded)
+            .build(true)
+            .toUriString()
+        return uri
+    }
+
     final override fun providerKind() = OauthProviderKind.GOOGLE
     private val config = registry.require(providerKind())
-    override fun disconnect(accessToken: String) {
+    override fun revoke(accessToken: String) {
         val p = "https://oauth2.googleapis.com/revoke"
         val uri = UriComponentsBuilder
             .fromHttpUrl(p)
@@ -36,23 +51,7 @@ class GoogleOauthService(
             .body(Map::class.java)
     }
 
-    override fun requestAuthCode(response: HttpServletResponse) {
-        val cfg = registry.require(providerKind())
-        val scopesEncoded = URLEncoder.encode(cfg.scopes.joinToString(" "), StandardCharsets.UTF_8)
-        val uri = UriComponentsBuilder
-            .fromHttpUrl("${cfg.codePath}")
-            .queryParam("client_id", cfg.clientId)
-            .queryParam("redirect_uri", cfg.redirectUri)
-            .queryParam("response_type", "code")
-            .queryParam("state", RandomUtils.generate(8))
-            .queryParam("scope", scopesEncoded)
-            .build(true)
-            .toUriString()
-
-        response.sendRedirect(uri)
-    }
-
-    override fun getUserInfo(accessToken: String): OAuthUserInfo {
+    override fun fetchUserInfo(accessToken: String): OAuthUserInfo {
         val url = config.userInfoPath ?: error("userInfoPath not configured for Google")
         val response = client.get()
             .uri(url)
@@ -66,7 +65,7 @@ class GoogleOauthService(
         )
     }
 
-    override fun getAccessToken(code: String): String? {
+    override fun exchangeToken(code: String): String? {
         val tokenPath = config.tokenPath ?: error("tokenPath not configured for Google")
         val clientId = config.clientId ?: error("clientId not configured for Google")
         val clientSecret = config.clientSecret ?: error("clientSecret not configured for Google")

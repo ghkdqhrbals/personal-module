@@ -17,12 +17,8 @@ import java.nio.charset.StandardCharsets
 class KakaoOauthService(
     private val client: RestClient,
     private val registry: OauthProviderRegistry,
-): OAuthService {
-    final override fun providerKind() = OauthProviderKind.KAKAO
-    private val config = registry.require(providerKind())
-
-    override fun requestAuthCode(response: HttpServletResponse) {
-        log().info(config.codePath)
+): OAuthService(OauthProviderKind.KAKAO) {
+    override fun buildAuthorizationUrl(state: String?): String {
         val scopesEncoded = URLEncoder.encode(config.scopes.joinToString(" "), StandardCharsets.UTF_8)
         val uri = UriComponentsBuilder
             .fromHttpUrl("${config.codePath}")
@@ -32,10 +28,13 @@ class KakaoOauthService(
             .apply { if (config.scopes.isNotEmpty()) queryParam("scope", scopesEncoded) }
             .build(true)
             .toUriString()
-        response.sendRedirect(uri)
+        return uri
     }
 
-    override fun getUserInfo(accessToken: String): OAuthUserInfo {
+    final override fun providerKind() = OauthProviderKind.KAKAO
+    private val config = registry.require(providerKind())
+
+    override fun fetchUserInfo(accessToken: String): OAuthUserInfo {
         val url = config.userInfoPath ?: error("userInfoPath not configured for KAKAO")
         val response = client.get()
             .uri(url)
@@ -49,7 +48,7 @@ class KakaoOauthService(
         )
     }
 
-    override fun getAccessToken(code: String): String? {
+    override fun exchangeToken(code: String): String? {
         val tokenPath = config.tokenPath ?: error("tokenPath not configured for KAKAO")
         val clientId = config.clientId ?: error("clientId not configured for KAKAO")
         val form: MultiValueMap<String, String> = LinkedMultiValueMap<String, String>().apply {
@@ -68,7 +67,7 @@ class KakaoOauthService(
         return tokenResponse?.get("access_token")?.toString()?: throw BadRequestException("Failed to get access token")
     }
 
-    override fun disconnect(accessToken: String) {
+    override fun revoke(accessToken: String) {
         val url = "https://kapi.kakao.com/v1/user/unlink"
         client.post()
             .uri(url)
@@ -76,6 +75,9 @@ class KakaoOauthService(
                 it.add("Authorization", "Bearer $accessToken")
             }
             .retrieve()
+//            .onStatus({ !it.is2xxSuccessful }) { _, clientResponse->
+//                // clientResponse.statusCode 에 맞는 에러 throw
+//            }
             .body(String::class.java)
     }
 }

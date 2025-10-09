@@ -18,10 +18,25 @@ import java.nio.charset.StandardCharsets
 class NaverOauthService(
     private val client: RestClient,
     private val registry: OauthProviderRegistry,
-) : OAuthService {
+) : OAuthService(OauthProviderKind.NAVER) {
     private val config = registry.require(providerKind())
+    override fun buildAuthorizationUrl(state: String?): String {
+        log().info("Initiating Naver OAuth authorization code request. codePath=${config.codePath}")
+        val scopesEncoded = URLEncoder.encode(config.scopes.joinToString(" "), StandardCharsets.UTF_8)
+        val uri = UriComponentsBuilder
+            .fromHttpUrl("${config.codePath}")
+            .queryParam("client_id", config.clientId)
+            .queryParam("redirect_uri", config.redirectUri)
+            .queryParam("response_type", "code")
+            .queryParam("state", RandomUtils.generate(8))
+            .queryParam("scope", scopesEncoded)
+            .build(true)
+            .toUriString()
+        return uri
+    }
+
     final override fun providerKind() = OauthProviderKind.NAVER
-    override fun disconnect(accessToken: String) {
+    override fun revoke(accessToken: String) {
         val uri = UriComponentsBuilder
             .fromHttpUrl(config.tokenPath ?: error("tokenPath not configured for ${providerKind()}"))
             .queryParam("client_secret", config.clientSecret)
@@ -36,22 +51,7 @@ class NaverOauthService(
             .retrieve()
             .body(Map::class.java)
     }
-
-    override fun requestAuthCode(response: HttpServletResponse) {
-        log().info("Initiating Naver OAuth authorization code request. codePath=${config.codePath}")
-        val scopesEncoded = URLEncoder.encode(config.scopes.joinToString(" "), StandardCharsets.UTF_8)
-        val uri = UriComponentsBuilder
-            .fromHttpUrl("${config.codePath}")
-            .queryParam("client_id", config.clientId)
-            .queryParam("redirect_uri", config.redirectUri)
-            .queryParam("response_type", "code")
-            .queryParam("state", RandomUtils.generate(8))
-            .build(true)
-            .toUriString()
-        response.sendRedirect(uri)
-    }
-
-    override fun getUserInfo(accessToken: String): OAuthUserInfo {
+    override fun fetchUserInfo(accessToken: String): OAuthUserInfo {
         val url = config.userInfoPath ?: error("userInfoPath not configured for NAVER")
         val response = client.get()
             .uri(url)
@@ -67,7 +67,7 @@ class NaverOauthService(
         )
     }
 
-    override fun getAccessToken(code: String): String? {
+    override fun exchangeToken(code: String): String? {
         val tokenPath = config.tokenPath ?: error("tokenPath not configured for NAVER")
         val clientId = config.clientId ?: error("clientId not configured for NAVER")
         val clientSecret = config.clientSecret ?: error("clientSecret not configured for NAVER")
