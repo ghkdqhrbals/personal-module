@@ -30,8 +30,9 @@ publishing {
     publications {
         create<MavenPublication>("mavenJava") {
             from(components["java"])
+            artifact(tasks.named("bootMetadataJar"))
             groupId = "com.ghkdqhrbals"
-            artifactId = "tester"
+            artifactId = "mod"
             version = project.version.toString()
         }
     }
