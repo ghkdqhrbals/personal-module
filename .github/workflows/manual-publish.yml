@@ -148,7 +148,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          TAG=v${{ needs.prepare.outputs.new_version }}
+          TAG=${{ needs.prepare.outputs.new_version }}
           if git rev-parse "$TAG" >/dev/null 2>&1; then
             echo "Tag $TAG already exists, skipping";
           else
@@ -160,12 +160,12 @@ jobs:
         if: ${{ github.event.inputs.create_release == 'true' }}
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ needs.prepare.outputs.new_version }}
-          name: v${{ needs.prepare.outputs.new_version }}
+          tag_name: ${{ needs.prepare.outputs.new_version }}
+          name: ${{ needs.prepare.outputs.new_version }}
           body: |
             자동 발행된 릴리스
             - 유형: ${{ github.event.inputs.release_type }}
-            - 버전: v${{ needs.prepare.outputs.new_version }}
+            - 버전: ${{ needs.prepare.outputs.new_version }}
         env:
           GITHUB_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
 
@@ -174,7 +174,7 @@ jobs:
           echo "## Publish Summary" >> $GITHUB_STEP_SUMMARY
           echo "- Modules: ${{ join(fromJson(needs.prepare.outputs.modules_json), ', ') }}" >> $GITHUB_STEP_SUMMARY
           echo "- Release Type: ${{ github.event.inputs.release_type }}" >> $GITHUB_STEP_SUMMARY
-          echo "- New Version: v${{ needs.prepare.outputs.new_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- New Version: ${{ needs.prepare.outputs.new_version }}" >> $GITHUB_STEP_SUMMARY
           echo "- Create Release: ${{ github.event.inputs.create_release }}" >> $GITHUB_STEP_SUMMARY
 
       - name: Send GitHub Action trigger data to Slack workflow
@@ -184,7 +184,7 @@ jobs:
           slack-webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
           actor: ${{ github.actor }}
           messages: >
-            ["Version: v${{ needs.prepare.outputs.new_version }}",
+            ["Version: ${{ needs.prepare.outputs.new_version }}",
              "Modules: ${{ join(fromJson(needs.prepare.outputs.modules_json), ', ') }}",
              "Release Type: ${{ github.event.inputs.release_type }}",
              "Create Release: ${{ github.event.inputs.create_release }}",
