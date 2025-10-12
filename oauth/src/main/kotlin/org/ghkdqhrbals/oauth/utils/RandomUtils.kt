@@ -1,4 +1,4 @@
-package com.ghkdqhrbals.mod.utils
+package org.ghkdqhrbals.oauth.utils
 
 import java.security.SecureRandom
 

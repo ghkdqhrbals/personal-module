@@ -2,18 +2,18 @@
   "groups": [
     {
       "name": "oauth.providers.kakao",
-      "type": "com.ghkdqhrbals.mod.config.OauthProvidersProperties",
-      "sourceType": "com.ghkdqhrbals.mod.config.OauthProvidersProperties",
+      "type": "org.ghkdqhrbals.oauth.config.OauthProvidersProperties",
+      "sourceType": "org.ghkdqhrbals.oauth.config.OauthProvidersProperties",
       "description": "Kakao OAuth provider configuration."
     },
     {
       "name": "oauth.providers.google",
-      "type": "com.ghkdqhrbals.mod.config.OauthProvidersProperties",
+      "type": "org.ghkdqhrbals.oauth.config.OauthProvidersProperties",
       "description": "Google OAuth provider configuration."
     },
     {
       "name": "oauth.providers.naver",
-      "type": "com.ghkdqhrbals.mod.config.OauthProvidersProperties",
+      "type": "org.ghkdqhrbals.oauth.config.OauthProvidersProperties",
       "description": "Naver OAuth provider configuration."
     }
   ],

@@ -1,3 +1,3 @@
-package com.ghkdqhrbals.mod.controller
+package org.ghkdqhrbals.oauth.controller
 
 class LoginControllerModuleMarker

@@ -1,7 +1,7 @@
 package org.ghkdqhrbals.oauth.config
 
-import com.ghkdqhrbals.mod.oauth.*
-import com.ghkdqhrbals.mod.service.OauthProviderKind
+import org.ghkdqhrbals.oauth.service.OauthProviderKind
+import org.ghkdqhrbals.oauth.oauth.OauthProviderRegistry
 import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration

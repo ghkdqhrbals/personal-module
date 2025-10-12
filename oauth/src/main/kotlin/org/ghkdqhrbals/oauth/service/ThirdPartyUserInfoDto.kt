@@ -1,4 +1,4 @@
-package com.ghkdqhrbals.mod.service
+package org.ghkdqhrbals.oauth.service
 
 data class OAuthUserInfo(
     val provider: OauthProviderKind,

@@ -1,8 +1,8 @@
-package com.ghkdqhrbals.mod.service
+package org.ghkdqhrbals.oauth.service
 
 import org.ghkdqhrbals.oauth.config.log
-import com.ghkdqhrbals.mod.oauth.OauthProviderRegistry
-import com.ghkdqhrbals.mod.utils.RandomUtils
+import org.ghkdqhrbals.oauth.oauth.OauthProviderRegistry
+import org.ghkdqhrbals.oauth.utils.RandomUtils
 import org.apache.coyote.BadRequestException
 import org.springframework.http.MediaType
 import org.springframework.stereotype.Service

@@ -1,6 +1,6 @@
-package com.ghkdqhrbals.mod.oauth
+package org.ghkdqhrbals.oauth.oauth
 
-import com.ghkdqhrbals.mod.service.OauthProviderKind
+import org.ghkdqhrbals.oauth.service.OauthProviderKind
 
 class OauthProviderRegistry private constructor(
     private val registry: Map<OauthProviderKind, OAuthConfig>

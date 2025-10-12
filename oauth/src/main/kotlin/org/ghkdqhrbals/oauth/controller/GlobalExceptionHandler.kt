@@ -1,4 +1,4 @@
-package com.ghkdqhrbals.mod.controller
+package org.ghkdqhrbals.oauth.controller
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass
 import org.springframework.http.ResponseEntity

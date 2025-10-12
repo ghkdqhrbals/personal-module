@@ -1,6 +1,6 @@
-package com.ghkdqhrbals.mod.oauth
+package org.ghkdqhrbals.oauth.oauth
 
-import com.ghkdqhrbals.mod.service.OauthProviderKind
+import org.ghkdqhrbals.oauth.service.OauthProviderKind
 
 // OAuth 설정 스냅샷 (불변)
 data class OAuthConfig(
