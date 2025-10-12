@@ -111,8 +111,8 @@ jobs:
           echo "Module: ${{ matrix.module }}"
           echo "Version: ${{ needs.prepare.outputs.new_version }}"
 
-      - name: Run tests (mod)
-        if: ${{ matrix.module == 'mod' }}
+      - name: Run tests (time)
+        if: ${{ matrix.module == 'time' }}
         run: ./gradlew test --no-daemon
 
       - name: Run tests (oauth)
@@ -120,8 +120,8 @@ jobs:
         run: ./gradlew test --no-daemon
         working-directory: oauth
 
-      - name: Publish (mod)
-        if: ${{ matrix.module == 'mod' }}
+      - name: Publish (time)
+        if: ${{ matrix.module == 'time' }}
         run: ./gradlew publish -PartifactVersion=${{ needs.prepare.outputs.new_version }} --no-daemon
         env:
           PACKAGES_ACTOR: ${{ github.actor }}
