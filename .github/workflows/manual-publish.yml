@@ -20,8 +20,8 @@ on:
         required: true
 
 permissions:
-  contents: write      # 태그/릴리스 푸시
-  packages: write      # GitHub Packages publish
+  contents: write
+  packages: write
   pull-requests: read
 
 concurrency:
@@ -52,9 +52,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          LATEST_TAG=$(git --no-pager tag --list 'v*' | sort -V | tail -n1 || true)
+          LATEST_TAG=$(git --no-pager tag --list '[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -n1 || true)
           if [ -n "${LATEST_TAG}" ]; then
-            BASE_VERSION=${LATEST_TAG#v}
+            BASE_VERSION=${LATEST_TAG}
           else
             BASE_VERSION=0.1.0
           fi
@@ -69,7 +69,6 @@ jobs:
             *) echo "Unknown release_type" >&2; exit 1 ;;
           esac
           NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
-          echo "New version: ${NEW_VERSION}"
           echo "NEW_VERSION=${NEW_VERSION}" >> $GITHUB_ENV
           echo "new_version=${NEW_VERSION}" >> $GITHUB_OUTPUT
 
@@ -111,31 +110,25 @@ jobs:
           echo "Module: ${{ matrix.module }}"
           echo "Version: ${{ needs.prepare.outputs.new_version }}"
 
-      - name: Run tests (time)
-        if: ${{ matrix.module == 'time' }}
-        run: ./gradlew :time:test --no-daemon
-      - name: Run tests (oauth)
-        if: ${{ matrix.module == 'oauth' }}
-        run: ./gradlew :oauth:test --no-daemon
+      - name: Run tests
+        run: ./gradlew :${{ matrix.module }}:test --no-daemon
 
-      - name: Publish (time)
-        if: ${{ matrix.module == 'time' }}
-        run: ./gradlew :time:publish -PartifactVersion=${{ needs.prepare.outputs.new_version }} --no-daemon
-        env:
-          PACKAGES_ACTOR: ${{ github.actor }}
-          PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
-      - name: Publish (oauth)
-        if: ${{ matrix.module == 'oauth' }}
-        run: ./gradlew :oauth:publish -PartifactVersion=${{ needs.prepare.outputs.new_version }} --no-daemon
+      - name: Publish
+        run: ./gradlew :${{ matrix.module }}:publish -PartifactVersion=${{ needs.prepare.outputs.new_version }} --no-daemon
         env:
           PACKAGES_ACTOR: ${{ github.actor }}
           PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
 
   tag_and_release:
-    name: Tag and Release
+    name: Tag and Release (${{ matrix.module }})
     needs: [prepare, build_and_publish]
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: ${{ fromJson(needs.prepare.outputs.modules_json) }}
     if: ${{ always() && needs.build_and_publish.result != 'cancelled' }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -143,14 +136,13 @@ jobs:
           fetch-depth: 0
 
       - name: Create and push tag
-        if: ${{ needs.prepare.outputs.new_version != '' }}
         run: |
           set -euo pipefail
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          TAG=${{ needs.prepare.outputs.new_version }}
+          TAG="${{ needs.prepare.outputs.new_version }}-${{ matrix.module }}"
           if git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "Tag $TAG already exists, skipping";
+            echo "Tag $TAG already exists, skipping"
           else
             git tag -a "$TAG" -m "Release $TAG"
             git push origin "$TAG"
@@ -160,10 +152,11 @@ jobs:
         if: ${{ github.event.inputs.create_release == 'true' }}
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.prepare.outputs.new_version }}
-          name: ${{ needs.prepare.outputs.new_version }}
+          tag_name: ${{ needs.prepare.outputs.new_version }}-${{ matrix.module }}
+          name: "📦 ${{ matrix.module }} v${{ needs.prepare.outputs.new_version }}"
           body: |
             자동 발행된 릴리스
+            - 모듈: ${{ matrix.module }}
             - 유형: ${{ github.event.inputs.release_type }}
             - 버전: ${{ needs.prepare.outputs.new_version }}
         env:
@@ -171,23 +164,22 @@ jobs:
 
       - name: Summary
         run: |
-          echo "## Publish Summary" >> $GITHUB_STEP_SUMMARY
-          echo "- Modules: ${{ join(fromJson(needs.prepare.outputs.modules_json), ', ') }}" >> $GITHUB_STEP_SUMMARY
+          echo "## Publish Summary (${{ matrix.module }})" >> $GITHUB_STEP_SUMMARY
+          echo "- Module: ${{ matrix.module }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Version: ${{ needs.prepare.outputs.new_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Tag: ${{ needs.prepare.outputs.new_version }}-${{ matrix.module }}" >> $GITHUB_STEP_SUMMARY
           echo "- Release Type: ${{ github.event.inputs.release_type }}" >> $GITHUB_STEP_SUMMARY
-          echo "- New Version: ${{ needs.prepare.outputs.new_version }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Create Release: ${{ github.event.inputs.create_release }}" >> $GITHUB_STEP_SUMMARY
 
-      - name: Send GitHub Action trigger data to Slack workflow
+      - name: Send Slack Notification
         if: always()
         uses: ghkdqhrbals/slack-list@v1.0.12
         with:
           slack-webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
           actor: ${{ github.actor }}
           messages: >
-            ["Version: ${{ needs.prepare.outputs.new_version }}",
-             "Modules: ${{ join(fromJson(needs.prepare.outputs.modules_json), ', ') }}",
+            ["Version: ${{ needs.prepare.outputs.new_version }}-${{ matrix.module }}",
+             "Module: ${{ matrix.module }}",
              "Release Type: ${{ github.event.inputs.release_type }}",
-             "Create Release: ${{ github.event.inputs.create_release }}",
              "Status: ${{ job.status }}"]
-          message-title: v${{ needs.prepare.outputs.new_version }} - ${{ job.status == 'success' && 'SUCCESS' || (job.status == 'cancelled' && 'CANCELLED' || 'FAILURE') }}
+          message-title: ${{ needs.prepare.outputs.new_version }}-${{ matrix.module }} - ${{ job.status == 'success' && 'SUCCESS' || (job.status == 'cancelled' && 'CANCELLED' || 'FAILURE') }}
           color: ${{ job.status == 'success' && '#3bb143' || (job.status == 'cancelled' && '#ffaa00' || '#ff4d4f') }}
