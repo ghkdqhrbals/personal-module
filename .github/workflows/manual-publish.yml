@@ -51,7 +51,7 @@ jobs:
         id: version
         shell: bash
         run: |
-          set -euo pipefail
+          set -eo pipefail
           LATEST_TAG=$(git --no-pager tag --list '[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -n1 || true)
           if [ -n "${LATEST_TAG}" ]; then
             BASE_VERSION=${LATEST_TAG}
@@ -137,7 +137,7 @@ jobs:
 
       - name: Create and push tag
         run: |
-          set -euo pipefail
+          set -eo pipefail
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           TAG="${{ needs.prepare.outputs.new_version }}-${{ matrix.module }}"
