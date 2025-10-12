@@ -34,8 +34,8 @@ publishing {
     publications {
         create<MavenPublication>("mavenJava") {
             from(components["java"])
-            groupId = "com.ghkdqhrbals"
-            artifactId = "mod"
+            groupId = "org.ghkdqhrbals"
+            artifactId = description
             version = project.version.toString()
         }
     }
