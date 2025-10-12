@@ -8,5 +8,5 @@ import org.springframework.context.annotation.Configuration
 
 @Configuration
 @EnableConfigurationProperties(OauthProvidersProperties::class)
-@ComponentScan("com.ghkdqhrbals.mod")
+@ComponentScan("org.ghkdqhrbals.oauth")
 class PersonalModuleAutoConfig
