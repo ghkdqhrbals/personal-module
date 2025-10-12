@@ -114,7 +114,6 @@ jobs:
       - name: Run tests (time)
         if: ${{ matrix.module == 'time' }}
         run: ./gradlew :time:test --no-daemon
-
       - name: Run tests (oauth)
         if: ${{ matrix.module == 'oauth' }}
         run: ./gradlew :oauth:test --no-daemon
@@ -126,11 +125,9 @@ jobs:
         env:
           PACKAGES_ACTOR: ${{ github.actor }}
           PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
-
       - name: Publish (oauth)
         if: ${{ matrix.module == 'oauth' }}
         run: ./gradlew :oauth:publish -PartifactVersion=${{ needs.prepare.outputs.new_version }} --no-daemon
-        working-directory: oauth
         env:
           PACKAGES_ACTOR: ${{ github.actor }}
           PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
