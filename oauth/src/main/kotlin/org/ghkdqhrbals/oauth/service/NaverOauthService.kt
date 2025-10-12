@@ -14,7 +14,7 @@ import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 
 @Service
-class NaverOauthService(
+internal class NaverOauthService(
     private val client: RestClient,
     private val registry: OauthProviderRegistry,
 ) : OAuthService(OauthProviderKind.NAVER) {

@@ -2,6 +2,7 @@ package org.ghkdqhrbals.oauth.controller
 
 
 import jakarta.servlet.http.HttpServletResponse
+import org.ghkdqhrbals.oauth.service.*
 import org.ghkdqhrbals.oauth.service.GoogleOauthService
 import org.ghkdqhrbals.oauth.service.KakaoOauthService
 import org.ghkdqhrbals.oauth.service.NaverOauthService
@@ -12,11 +13,10 @@ import org.springframework.web.bind.annotation.RestController
 
 @ConditionalOnClass(LoginControllerModuleMarker::class)
 @RestController
-class LoginController(
-    private val kakao: KakaoOauthService,
-    private val naver: NaverOauthService,
-    private val google: GoogleOauthService
-) {
+class LoginController(oAuthClientFactory: OAuthClientFactory) {
+    private val kakao: OAuthService = oAuthClientFactory.get(OauthProviderKind.KAKAO)
+    private val naver: OAuthService = oAuthClientFactory.get(OauthProviderKind.NAVER)
+    private val google: OAuthService = oAuthClientFactory.get(OauthProviderKind.GOOGLE)
 
     @GetMapping("/login/google")
     fun googleLogin(response: HttpServletResponse) = response.sendRedirect(google.buildAuthorizationUrl())

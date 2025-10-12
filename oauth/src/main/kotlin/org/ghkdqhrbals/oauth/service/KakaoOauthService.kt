@@ -12,7 +12,7 @@ import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 
 @Service
-class KakaoOauthService(
+internal class KakaoOauthService(
     private val client: RestClient,
     private val registry: OauthProviderRegistry,
 ): OAuthService(OauthProviderKind.KAKAO) {

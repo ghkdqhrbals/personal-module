@@ -2,6 +2,9 @@ package org.ghkdqhrbals.oauth.oauth
 
 import org.ghkdqhrbals.oauth.service.OauthProviderKind
 
+/**
+ * configuration for each OAuth provider.
+ */
 class OauthProviderRegistry private constructor(
     private val registry: Map<OauthProviderKind, OAuthConfig>
 ) {
