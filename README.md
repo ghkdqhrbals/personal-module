@@ -1,103 +1,48 @@
-# mod (OAuth + DateTime Utility Module)
+# mod (OAuth + DateTime Utilities)
 
-This module provides an **OAuth provider integration module** that can be reused in Spring Boot applications (supports Kakao / Naver / Google).
+> 개인적으로 여기저기 꺼내쓰기 위한(+ 사내 적용 전 실험목적) 패키지입니다. 
 
-# Why I built this?
+Reusable OAuth integration (Kakao/Naver/Google) and DateTime helpers for Spring Boot.
 
-Yes. Spring security already supports OAuth2.0 Client. And it's convenient to use. 
+## Features
+- OAuth: auth URL, code→token, user info, revoke, pluggable providers
+- Configurable per-provider (redirectUri, scopes, extra params)
+- DTO mapping and extensible handlers (success/failure/logout)
+- Works with/without Spring Security
+- Time: convert epoch(ms/µs/ns) and parse common date-time strings
 
-**But it's hard to customize and has many unnecessary dependencies!** Also it does not support token revocation.
-
-Besides, not only OAuth2.0 Client, but also DateTime utility is included. That means I built this module to use it in various projects, and I'm releasing it as an open-source module. 
-
-# Key features
-
-* OAuth2.0(Google, Naver, Kakao)
-  * revoke token
-  * get user info
-  * exchange code to token
-  * generate authorization url
-* OffsetDateTime utilities
-  * convert epoch millis/micros/nanos to OffsetDateTime
-  * parse various datetime strings to OffsetDateTime
-
-# OAuth2.0 Quick Start
-
-Since this module uses github packages, you need to provide a read token :)
-
-### 1. Gradle(Kotlin DSL)
-
+## Getting started (Gradle - Kotlin DSL)
 ```kotlin
 repositories {
     mavenCentral()
-    maven {
-        url = uri("https://maven.pkg.github.com/ghkdqhrbals/personal-module")
-        credentials {
-            username = "<github_username>"
-            password = "<personal_access_token>"
-        }
-    }
+    maven { url = uri("https://jitpack.io") }
 }
 
 dependencies {
-    implementation("com.github.ghkdqhrbals:personal-module:0.2.0")
+    implementation("com.github.ghkdqhrbals:personal-module:{TAG}:oauth")
+    implementation("com.github.ghkdqhrbals:personal-module:{TAG}:time")
 }
+
 ```
 
-### 2. configure application.yml
-
-```yaml
-oauth:
-  providers:
-    kakao:
-      client-id: ${KAKAO_CLIENT_ID}
-      client-secret: ${KAKAO_CLIENT_SECRET}
-      redirect-uri: https://your.app/login/oauth2/code/kakao
-      scopes: [account_email, profile_nickname]
-    naver:
-      client-id: ${NAVER_CLIENT_ID}
-      client-secret: ${NAVER_CLIENT_SECRET}
-      redirect-uri: https://your.app/login/oauth2/code/naver
-    google:
-      client-id: ${GOOGLE_CLIENT_ID}
-      client-secret: ${GOOGLE_CLIENT_SECRET}
-      redirect-uri: https://your.app/login/oauth2/code/google
-      scopes: [openid, email, profile]
-```
-
-
-## Usage
+## Minimal usage example
 
 ```kotlin
 @RestController
-class AuthController(
-    private val kakao: KakaoOauthService,
-) {
+class LoginController(private val kakao: KakaoOauthService) {
     @GetMapping("/login/kakao")
-    fun kakaoLogin(response: HttpServletResponse) {
-        response.sendRedirect(kakao.authorizationUrl())
+    fun kakaoLogin(resp: HttpServletResponse) {
+        resp.sendRedirect(kakao.authorizationUrl())
     }
-
     @GetMapping("/login/oauth2/code/kakao")
-    fun kakaoCallback(@RequestParam code: String): OAuthUserInfo {
+    fun kakaoCallback(@RequestParam code: String): Map<String, Any?> {
         val token = kakao.exchange(code)
         return kakao.userInfo(token.accessToken)
     }
-    // etc.
 }
 ```
 
 ## Demo
+Run and open http://localhost:8080/oauth2
 
-run this module directly and acess [http://localhost:8080/oauth2](http://localhost:8080/oauth2)
-
-<img width="1190" height="754" alt="image" src="https://github.com/user-attachments/assets/fea0df4a-83d0-4de7-a5e9-60c043824a4b" />
-
-
-> For your safety, please use secure vault service (ex. AWS Secrets Manager, HashiCorp Vault, Doppler, etc.)
-
-## After v0.2.0 we will ...
-- support Apple OAuth
-- Refresh Token Rotation
-
-
+> Store secrets safely (e.g., AWS Secrets Manager, Vault, Doppler).
