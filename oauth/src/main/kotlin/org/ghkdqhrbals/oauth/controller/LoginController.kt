@@ -2,10 +2,9 @@ package org.ghkdqhrbals.oauth.controller
 
 
 import jakarta.servlet.http.HttpServletResponse
-import org.ghkdqhrbals.oauth.service.*
-import org.ghkdqhrbals.oauth.service.GoogleOauthService
-import org.ghkdqhrbals.oauth.service.KakaoOauthService
-import org.ghkdqhrbals.oauth.service.NaverOauthService
+import org.ghkdqhrbals.oauth.service.OAuthClientFactory
+import org.ghkdqhrbals.oauth.service.OAuthService
+import org.ghkdqhrbals.oauth.service.OauthProviderKind
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.RequestParam
