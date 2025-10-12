@@ -11,8 +11,6 @@ import org.springframework.web.bind.annotation.RestController
 @ConditionalOnClass(LoginControllerModuleMarker::class)
 @RestController
 class LoginController(private val oAuthClientFactory: OAuthClientFactory) {
-    
-
     @GetMapping("/login/google")
     fun googleLogin(response: HttpServletResponse) = response.sendRedirect(oAuthClientFactory.get(OauthProviderKind.GOOGLE).buildAuthorizationUrl())
     @GetMapping("/logout/google")
