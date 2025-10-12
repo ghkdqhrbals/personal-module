@@ -10,8 +10,62 @@ permissions:
   pull-requests: write
 
 jobs:
-  test:
+  prepare:
+    name: Detect changed modules
     runs-on: ubuntu-latest
+    outputs:
+      modules_json: ${{ steps.matrix.outputs.modules_json }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          filters: |
+            time:
+              - 'time/**'
+            oauth:
+              - 'oauth/**'
+            buildsys:
+              - '**/*.gradle*'
+              - 'settings.gradle*'
+              - 'gradle/**'
+              - '.github/workflows/**'
+              - 'buildSrc/**'
+
+      - name: Build test matrix
+        id: matrix
+        run: |
+          modules=()
+          if [ "${{ steps.filter.outputs.time }}" = 'true' ]; then modules+=("\"time\""); fi
+          if [ "${{ steps.filter.outputs.oauth }}" = 'true' ]; then modules+=("\"oauth\""); fi
+
+          # 빌드 스크립트/워크플로 변경만 있는 경우 전체 테스트
+          if [ ${#modules[@]} -eq 0 ] && [ "${{ steps.filter.outputs.buildsys }}" = 'true' ]; then
+            modules=("\"time\"" "\"oauth\"")
+          fi
+
+          # 아무 모듈도 감지되지 않으면 안전하게 전체 테스트
+          if [ ${#modules[@]} -eq 0 ]; then
+            modules=("\"time\"" "\"oauth\"")
+          fi
+
+          json="[${modules[*]}]"
+          echo "modules_json=${json}" >> "$GITHUB_OUTPUT"
+
+  test:
+    name: Test (${{ matrix.module }})
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module: ${{ fromJson(needs.prepare.outputs.modules_json) }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,15 +88,15 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-
 
-      - name: Gradle Test
-        run: ./gradlew test --no-daemon
+      - name: Gradle Test (${{ matrix.module }})
+        run: ./gradlew :${{ matrix.module }}:test --no-daemon
 
-      - name: Publish Unit Test Results
+      - name: Publish Unit Test Results (${{ matrix.module }})
         uses: EnricoMi/publish-unit-test-result-action@v2
         if: always()
         with:
-          files: build/test-results/test/*.xml
-          check_name: "JUnit Test Results"
+          files: ${{ matrix.module }}/build/test-results/test/*.xml
+          check_name: "JUnit (${{ matrix.module }})"
           comment_mode: always
           job_summary: true
           report_individual_runs: true
