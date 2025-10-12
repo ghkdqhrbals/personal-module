@@ -13,7 +13,7 @@ import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 
 @Service
-class GoogleOauthService(
+internal class GoogleOauthService(
     private val client: RestClient,
     private val registry: OauthProviderRegistry,
 ): OAuthService(OauthProviderKind.GOOGLE) {
