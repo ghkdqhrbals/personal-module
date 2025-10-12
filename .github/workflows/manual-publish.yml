@@ -113,16 +113,16 @@ jobs:
 
       - name: Run tests (time)
         if: ${{ matrix.module == 'time' }}
-        run: ./gradlew :time test --no-daemon
+        run: ./gradlew :time:test --no-daemon
 
       - name: Run tests (oauth)
         if: ${{ matrix.module == 'oauth' }}
-        run: ./gradlew :oauth test --no-daemon
+        run: ./gradlew :oauth:test --no-daemon
         working-directory: oauth
 
       - name: Publish (time)
         if: ${{ matrix.module == 'time' }}
-        run: ./gradlew :time publish -PartifactVersion=${{ needs.prepare.outputs.new_version }} --no-daemon
+        run: ./gradlew :time:publish -PartifactVersion=${{ needs.prepare.outputs.new_version }} --no-daemon
         env:
           PACKAGES_ACTOR: ${{ github.actor }}
           PACKAGES_TOKEN: ${{ secrets.PACKAGES_TOKEN }}
