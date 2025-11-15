@@ -1,5 +1,6 @@
 package org.ghkdqhrbals.client.ai
 
+import org.ghkdqhrbals.client.paper.dto.PaperAnalysisResponse
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.stereotype.Component
 
@@ -14,8 +15,8 @@ class NoopLlmClient : LlmClient {
         )
     }
 
-    override fun summarizePaper(abstract: String, maxLength: Int): String {
+    override fun summarizePaper(abstract: String, maxLength: Int, journalRef: String?): PaperAnalysisResponse {
         // OpenAI가 비활성화된 경우 요약은 빈 문자열 반환
-        return ""
+        return PaperAnalysisResponse()
     }
 }

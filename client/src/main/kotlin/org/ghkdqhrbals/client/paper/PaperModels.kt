@@ -20,14 +20,16 @@ data class PaperSearchRequest(
 data class Paper(
     val title: String,
     val authors: List<String>,
-    val journal: String,
+    val journal: String?,
     val publicationDate: String?,
     val doi: String?,
     val abstract: String?,
     val url: String?,
     val citations: Int? = null,
     val impactFactor: Double? = null,
-    val summary: String? = null // 요약 추가
+    val summary: String? = null,
+    val novelty: String? = null,
+    val journalRefRaw: String? = null  // LLM 전달용
 )
 
 /**

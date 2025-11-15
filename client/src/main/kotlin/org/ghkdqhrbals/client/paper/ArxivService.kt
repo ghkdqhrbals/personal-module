@@ -104,28 +104,18 @@ class ArxivService(
             val foreign: List<Element> = entryImpl?.foreignMarkup ?: emptyList()
             val doi = foreign.firstOrNull { it.namespacePrefix == "arxiv" && it.name == "doi" }?.text
             val journalRefRaw = foreign.firstOrNull { it.namespacePrefix == "arxiv" && it.name == "journal_ref" }?.text
-            val journalName = normalizeJournalRef(journalRefRaw)
-
-            val year = published?.substring(0, 4)?.toIntOrNull()
-                ?: extractYearFromJournalRef(journalRefRaw)
-            val impact = journalName?.let {
-                metricProvider.getLatestImpactMetric(it, year)?.first.also { if_ ->
-                    if (if_ != null) {
-                        logger().debug("Journal found: '$it' with IF=$if_")
-                    }
-                }
-            }
 
             Paper(
                 title = title,
                 authors = authors,
-                journal = journalName ?: "arXiv",
+                journal = null,  // LLM에서 추출할 예정
                 publicationDate = published,
                 doi = doi,
                 abstract = abs,
                 url = link,
                 citations = null,
-                impactFactor = impact
+                impactFactor = null,  // LLM 추출 후 조회
+                journalRefRaw = journalRefRaw  // 임시 저장
             )
         }.filter { p ->
             if (from == null) true else p.publicationDate?.let { LocalDate.parse(it) >= from } ?: false
@@ -136,7 +126,7 @@ class ArxivService(
             logger().info("arXiv result[$idx] title='${p.title}', date='${p.publicationDate}', url='${p.url}'")
         }
 
-        // 병렬로 요약 생성
+        // 병렬로 요약 생성 및 저널 정보 추출
         val processed = runBlocking {
             papers.map { p ->
                 async {
@@ -146,11 +136,34 @@ class ArxivService(
                         p
                     } else if (summarize && !p.abstract.isNullOrBlank()) {
                         logger().info("Start LLM summary for: ${p.title}")
-                        val s = runCatching { llm.summarizePaper(p.abstract, 120) }
+                        val analysis = runCatching {
+                            llm.summarizePaper(p.abstract, 120, p.journalRefRaw)
+                        }
                             .onSuccess { logger().info("Completed LLM summary for: ${p.title}") }
                             .onFailure { e -> logger().warn("summary failed for '${p.title}': ${e.message}") }
                             .getOrNull()
-                        p.copy(summary = s)
+
+                        val journalName = analysis?.journalName
+                        val year = analysis?.year ?: p.publicationDate?.substring(0, 4)?.toIntOrNull()
+
+                        // LLM이 제공한 IF를 우선 사용, 없으면 OpenAlex로 보강
+                        val (ifValue, ifYear) = if (analysis?.impactFactor != null) {
+                            analysis.impactFactor to (analysis.impactFactorYear ?: year)
+                        } else if (journalName != null) {
+                            val fromApi = metricProvider.getLatestImpactMetric(journalName, year)
+                            (fromApi?.first) to (fromApi?.second)
+                        } else null to null
+
+                        if (ifValue != null) {
+                            logger().info("Impact Factor resolved: journal='${journalName}', IF=$ifValue (year=${ifYear})")
+                        }
+
+                        p.copy(
+                            summary = analysis?.coreContribution,
+                            novelty = analysis?.noveltyAgainstPreviousWorks,
+                            journal = journalName ?: p.journal ?: "arXiv",
+                            impactFactor = ifValue ?: p.impactFactor
+                        )
                     } else p
                 }
             }.awaitAll()
@@ -171,7 +184,8 @@ class ArxivService(
                 url = p.url?.take(255),
                 journal = p.journal?.take(255),
                 impactFactor = p.impactFactor,
-                summary = p.summary
+                summary = p.summary,
+                novelty = p.novelty
             )
         }.filter { entity ->
             // 중복 제거: arxiv_id 또는 url이 이미 존재하면 스킵
@@ -204,15 +218,6 @@ class ArxivService(
 
         val tokens = mutableListOf<String>()
 
-        // 1) free-text query → all:<word> 형태로 쪼개기
-//        query
-//            ?.trim()
-//            ?.takeIf { it.isNotBlank() }
-//            ?.split(Regex("\\s+"))
-//            ?.forEach { word ->
-//                tokens += "all:$word"
-//            }
-        // query 에 "machine learning" 이라면 all:machine+learning 으로 변환
         query
             ?.trim()
             ?.takeIf { it.isNotBlank() }
@@ -259,44 +264,6 @@ class ArxivService(
         val startIdx = extract("startIndex")
         if (total != null || perPage != null || startIdx != null) {
             logger().info("arXiv opensearch: totalResults=$total, itemsPerPage=$perPage, startIndex=$startIdx")
-        }
-    }
-
-    private fun extractYearFromJournalRef(ref: String?): Int? {
-        if (ref.isNullOrBlank()) return null
-
-        // "Nature 646, 818-824 (2025)" -> 2025
-        // "Cell 187 (2024)" -> 2024
-        val yearInParens = Regex("\\((\\d{4})\\)").find(ref)?.groupValues?.getOrNull(1)?.toIntOrNull()
-        if (yearInParens != null) return yearInParens
-
-        // "JAMA, 2024" -> 2024
-        val yearAfterComma = Regex(",\\s*(\\d{4})").find(ref)?.groupValues?.getOrNull(1)?.toIntOrNull()
-        if (yearAfterComma != null) return yearAfterComma
-
-        return null
-    }
-
-    private fun normalizeJournalRef(ref: String?): String? {
-        if (ref.isNullOrBlank()) return null
-
-        logger().debug("Parsing journal_ref: '$ref'")
-
-        val cleaned = ref.trim()
-
-        // 1. 쉼표 이전 부분 추출 (예: "Nature 646, 818-824 (2025)" -> "Nature 646")
-        val beforeComma = cleaned.split(",").firstOrNull()?.trim() ?: return null
-
-        // 2. 숫자로 시작하는 부분 제거 (볼륨/페이지 번호)
-        //    예: "Nature 646" -> "Nature"
-        //    예: "IEEE TPAMI vol.45" -> "IEEE TPAMI vol"
-        val journalName = beforeComma.split(Regex("\\s+"))
-            .takeWhile { !it.matches(Regex("^\\d+.*")) && !it.startsWith("vol", ignoreCase = true) }
-            .joinToString(" ")
-            .trim()
-
-        return journalName.takeIf { it.isNotBlank() }.also { result ->
-            logger().debug("Extracted journal name: '$result' from '$ref'")
         }
     }
 }

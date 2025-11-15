@@ -48,7 +48,7 @@ class ScholarService(
                 p
             } else if (summarize && !p.abstract.isNullOrBlank()) {
                 val s = runCatching { llm.summarizePaper(p.abstract, 120) }.getOrNull()
-                p.copy(summary = s)
+                p.copy(summary = s?.coreContribution, novelty = s?.noveltyAgainstPreviousWorks)
             } else p
         }
 

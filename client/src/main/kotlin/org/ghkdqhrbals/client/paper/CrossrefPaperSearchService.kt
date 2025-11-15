@@ -67,7 +67,7 @@ class CrossrefPaperSearchService(
                     val summarized = if (!dedup.alreadyExists(withIf) && request.summarize == true && !p.abstract.isNullOrBlank()) {
                         logger().info("Generate LLM summary for: ${p.title}")
                         val summary = runCatching { llmClient.summarizePaper(p.abstract, 120) }.getOrNull()
-                        withIf.copy(summary = summary)
+                        withIf.copy(summary = summary?.coreContribution, novelty = summary?.noveltyAgainstPreviousWorks)
                     } else {
                         if (dedup.alreadyExists(withIf)) logger().info("Skip LLM (exists): ${p.title}")
                         withIf

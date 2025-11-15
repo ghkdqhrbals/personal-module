@@ -39,6 +39,8 @@ data class PaperEntity(
     val impactFactor: Double? = null,
 
     @Column(name = "summary", columnDefinition = "TEXT")
-    val summary: String? = null
+    val summary: String? = null,
+
+    val  novelty: String? = null
 )
 

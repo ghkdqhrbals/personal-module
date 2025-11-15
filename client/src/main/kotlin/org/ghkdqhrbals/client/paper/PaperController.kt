@@ -76,7 +76,7 @@ class PaperController(
         @RequestBody request: SummarizeRequest
     ): ResponseEntity<SummarizeResponse> {
         val summary = llmClient.summarizePaper(request.abstract, request.maxLength ?: 150)
-        return ResponseEntity.ok(SummarizeResponse(summary))
+        return ResponseEntity.ok(SummarizeResponse(summary.coreContribution))
     }
 }
 
