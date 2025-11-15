@@ -8,7 +8,7 @@ class OAuthClientFactory(
     private val services: List<OAuthService>,
     private val registry: OauthProviderRegistry,
 ) {
-    private val map = services.associateBy { it.kind }
+    private val map = services.associateBy { it.provider }
 
     fun get(provider: String): OAuthService {
         val kind = OauthProviderKind.valueOf(provider)
@@ -28,7 +28,7 @@ class OAuthClientFactory(
         val missing = mutableListOf<String>()
         if (cfg.clientId.isNullOrBlank()) missing += "clientId"
         if (cfg.redirectUri.isNullOrBlank()) missing += "redirectUri"
-        if (cfg.codePath.isNullOrBlank()) missing += "codePath"
+        if (cfg.authorizationUri.isNullOrBlank()) missing += "codePath"
         if (cfg.tokenPath.isNullOrBlank()) missing += "tokenPath"
         if (cfg.userInfoPath.isNullOrBlank()) missing += "userInfoPath"
         if (missing.isNotEmpty()) {

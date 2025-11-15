@@ -16,14 +16,16 @@ import java.nio.charset.StandardCharsets
 @Service
 internal class NaverOauthService(
     private val client: RestClient,
-    private val registry: OauthProviderRegistry,
-) : OAuthService(OauthProviderKind.NAVER) {
-    private val config = registry.require(providerKind())
+    registry: OauthProviderRegistry,
+) : OAuthService(
+    provider = OauthProviderKind.NAVER,
+    registry = registry
+) {
     override fun buildAuthorizationUrl(state: String?): String {
-        log().info("Initiating Naver OAuth authorization code request. codePath=${config.codePath}")
+        log().info("Initiating Naver OAuth authorization code request. codePath=${config.authorizationUri}")
         val scopesEncoded = URLEncoder.encode(config.scopes.joinToString(" "), StandardCharsets.UTF_8)
         val uri = UriComponentsBuilder
-            .fromHttpUrl("${config.codePath}")
+            .fromHttpUrl("${config.authorizationUri}")
             .queryParam("client_id", config.clientId)
             .queryParam("redirect_uri", config.redirectUri)
             .queryParam("response_type", "code")
@@ -34,10 +36,9 @@ internal class NaverOauthService(
         return uri
     }
 
-    final override fun providerKind() = OauthProviderKind.NAVER
-    override fun revoke(accessToken: String) {
+    override fun tokenRevoke(accessToken: String) {
         val uri = UriComponentsBuilder
-            .fromHttpUrl(config.tokenPath ?: error("tokenPath not configured for ${providerKind()}"))
+            .fromHttpUrl(config.tokenPath ?: error("tokenPath not configured for ${provider}"))
             .queryParam("client_secret", config.clientSecret)
             .queryParam("client_id", config.clientId)
             .queryParam("grant_type", "delete")
@@ -61,7 +62,7 @@ internal class NaverOauthService(
         val id = resp?.get("id").toString()
         return OAuthUserInfo(
             providerId = id,
-            provider = providerKind(),
+            provider = provider,
             rawAttributes = response.filterKeys { it is String } as Map<String, Any>
         )
     }

@@ -1,0 +1,35 @@
+spring:
+  application:
+    name: client
+  config:
+    import:
+      - optional:aws-secretsmanager:personal/beta
+  cloud:
+    aws:
+      region:
+        static: ap-northeast-2
+      credentials:
+        profile:
+          name: default
+      secretsmanager:
+        enabled: true
+        fail-fast: false
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://database-1.chmscg6ww41e.ap-northeast-2.rds.amazonaws.com:3306/paper?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.MySQLDialect
+
+openai:
+  enabled: true
+  api:
+    key: ${OPENAI_API_KEY:}
+
+serpapi:
+  key: ${SERPAPI_KEY:}

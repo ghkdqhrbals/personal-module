@@ -15,13 +15,17 @@ import java.nio.charset.StandardCharsets
 @Service
 internal class GoogleOauthService(
     private val client: RestClient,
-    private val registry: OauthProviderRegistry,
-): OAuthService(OauthProviderKind.GOOGLE) {
+    registry: OauthProviderRegistry,
+): OAuthService(
+    provider = OauthProviderKind.GOOGLE,
+    registry = registry
+) {
+
     override fun buildAuthorizationUrl(state: String?): String {
-        val cfg = registry.require(providerKind())
+        val cfg = registry.require(provider)
         val scopesEncoded = URLEncoder.encode(cfg.scopes.joinToString(" "), StandardCharsets.UTF_8)
         val uri = UriComponentsBuilder
-            .fromHttpUrl("${cfg.codePath}")
+            .fromHttpUrl("${cfg.authorizationUri}")
             .queryParam("client_id", cfg.clientId)
             .queryParam("redirect_uri", cfg.redirectUri)
             .queryParam("response_type", "code")
@@ -32,12 +36,10 @@ internal class GoogleOauthService(
         return uri
     }
 
-    final override fun providerKind() = OauthProviderKind.GOOGLE
-    private val config = registry.require(providerKind())
-    override fun revoke(accessToken: String) {
-        val p = "https://oauth2.googleapis.com/revoke"
+    override fun tokenRevoke(accessToken: String) {
         val uri = UriComponentsBuilder
-            .fromHttpUrl(p)
+            .fromHttpUrl(config.tokenRevocationUri
+                ?: throw RuntimeException("token revoke uri property is missing"))
             .queryParam("token", accessToken)
             .build(true)
             .toUriString()
@@ -58,7 +60,7 @@ internal class GoogleOauthService(
             .body(Map::class.java) as Map<*, *>
         return OAuthUserInfo(
             providerId = response["sub"].toString(),
-            provider = providerKind(),
+            provider = this.provider,
             rawAttributes = response.filterKeys { it is String } as Map<String, Any>
         )
     }

@@ -1,0 +1,5 @@
+openai:
+  enabled: false
+  api:
+    key: test-api-key
+

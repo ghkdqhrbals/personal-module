@@ -8,7 +8,7 @@ import org.springframework.context.annotation.Configuration
 
 @Configuration
 @EnableConfigurationProperties(OauthProvidersProperties::class)
-class OauthProviderConfiguration {
+class OauthProviderAutoConfiguration {
 
     @Bean
     fun oauthProviderRegistry(props: OauthProvidersProperties): OauthProviderRegistry {
@@ -17,17 +17,20 @@ class OauthProviderConfiguration {
             // default
             add(OauthProviderKind.KAKAO) {
                 tokenPath = "https://kauth.kakao.com/oauth/token"
-                codePath = "https://kauth.kakao.com/oauth/authorize"
+                tokenRevocationUri = "https://kauth.kakao.com/oauth/token"
+                authorizationUri = "https://kauth.kakao.com/oauth/authorize"
                 userInfoPath = "https://kapi.kakao.com/v2/user/me"
             }
             add(OauthProviderKind.NAVER) {
                 tokenPath = "https://nid.naver.com/oauth2.0/token"
-                codePath = "https://nid.naver.com/oauth2.0/authorize"
+                tokenRevocationUri = "https://nid.naver.com/oauth2.0/token"
+                authorizationUri = "https://nid.naver.com/oauth2.0/authorize"
                 userInfoPath = "https://openapi.naver.com/v1/nid/me"
             }
             add(OauthProviderKind.GOOGLE) {
+                tokenRevocationUri = "https://oauth2.googleapis.com/revoke"
                 tokenPath = "https://oauth2.googleapis.com/token"
-                codePath = "https://accounts.google.com/o/oauth2/v2/auth"
+                authorizationUri = "https://accounts.google.com/o/oauth2/v2/auth"
                 userInfoPath = "https://www.googleapis.com/oauth2/v3/userinfo"
                 scope("openid", "email")
             }
@@ -40,7 +43,7 @@ class OauthProviderConfiguration {
                     if (cfg.clientSecret.isNotEmpty()) clientSecret = cfg.clientSecret
                     if (cfg.redirectUri.isNotEmpty()) redirectUri = cfg.redirectUri
                     if (!cfg.tokenPath.isNullOrEmpty()) tokenPath = cfg.tokenPath
-                    if (!cfg.codePath.isNullOrEmpty()) codePath = cfg.codePath
+                    if (!cfg.codePath.isNullOrEmpty()) authorizationUri = cfg.codePath
                     if (!cfg.userInfoPath.isNullOrEmpty()) userInfoPath = cfg.userInfoPath
                     if (cfg.scopes.isNotEmpty()) scope(*cfg.scopes.toTypedArray())
                 }
