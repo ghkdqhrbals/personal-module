@@ -1,0 +1,5 @@
+numpy<2
+torch==2.2.2
+transformers==4.53.0
+huggingface-hub==0.30.0
+flask==3.0.0

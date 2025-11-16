@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>학술 논문 검색</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            border-bottom: 3px solid #4CAF50;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #555;
+            margin-top: 30px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+        input, select, textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            box-sizing: border-box;
+            font-size: 14px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-right: 10px;
+            margin-top: 10px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        #results {
+            margin-top: 30px;
+        }
+        .paper-card {
+            background-color: #f9f9f9;
+            padding: 20px;
+            margin-bottom: 15px;
+            border-left: 4px solid #4CAF50;
+            border-radius: 5px;
+        }
+        .paper-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: #2196F3;
+            margin-bottom: 10px;
+        }
+        .paper-info {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 5px;
+        }
+        .paper-abstract {
+            color: #444;
+            margin-top: 10px;
+            line-height: 1.6;
+        }
+        .badge {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 3px;
+            font-size: 12px;
+            margin-right: 5px;
+        }
+        .badge-if {
+            background-color: #ff9800;
+            color: white;
+        }
+        .badge-citations {
+            background-color: #2196F3;
+            color: white;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+        .error {
+            background-color: #ffebee;
+            color: #c62828;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+        }
+        .journal-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+        .journal-card {
+            background-color: #e3f2fd;
+            padding: 15px;
+            border-radius: 5px;
+            border-left: 4px solid #2196F3;
+        }
+        .journal-name {
+            font-weight: bold;
+            color: #1976D2;
+            margin-bottom: 5px;
+        }
+        .tabs {
+            display: flex;
+            border-bottom: 2px solid #ddd;
+            margin-bottom: 20px;
+        }
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            border: none;
+            background: none;
+            font-size: 16px;
+            color: #666;
+            border-bottom: 3px solid transparent;
+            margin-bottom: -2px;
+        }
+        .tab.active {
+            color: #4CAF50;
+            border-bottom-color: #4CAF50;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📚 학술 논문 검색 시스템</h1>
+
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('search')">논문 검색</button>
+            <button class="tab" onclick="switchTab('journals')">저널 목록</button>
+            <button class="tab" onclick="switchTab('summarize')">논문 요약</button>
+        </div>
+
+        <!-- 논문 검색 탭 -->
+        <div id="search-tab" class="tab-content active">
+            <h2>카테고리별 논문 검색</h2>
+            <div class="form-group">
+                <label for="category">카테고리</label>
+                <select id="category">
+                    <option value="Computer Science">Computer Science</option>
+                    <option value="Medicine">Medicine</option>
+                    <option value="Physics">Physics</option>
+                    <option value="Biology">Biology</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="minImpactFactor">최소 Impact Factor</label>
+                <input type="number" id="minImpactFactor" value="10.0" step="0.1" min="0">
+            </div>
+            <div class="form-group">
+                <label for="maxResults">최대 결과 수</label>
+                <input type="number" id="maxResults" value="10" min="1" max="50">
+            </div>
+            <div class="form-group">
+                <label for="fromDate">시작 날짜 (선택)</label>
+                <input type="date" id="fromDate" value="2024-01-01">
+            </div>
+            <button onclick="searchPapers()">검색</button>
+        </div>
+
+        <!-- 저널 목록 탭 -->
+        <div id="journals-tab" class="tab-content">
+            <h2>주요 저널 목록</h2>
+            <div class="form-group">
+                <label for="journalCategory">카테고리</label>
+                <select id="journalCategory">
+                    <option value="Computer Science">Computer Science</option>
+                    <option value="Medicine">Medicine</option>
+                    <option value="Physics">Physics</option>
+                    <option value="Biology">Biology</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="journalMinIF">최소 Impact Factor</label>
+                <input type="number" id="journalMinIF" value="10.0" step="0.1" min="0">
+            </div>
+            <button onclick="getTopJournals()">조회</button>
+        </div>
+
+        <!-- 논문 요약 탭 -->
+        <div id="summarize-tab" class="tab-content">
+            <h2>논문 초록 AI 요약</h2>
+            <div class="form-group">
+                <label for="abstract">논문 초록</label>
+                <textarea id="abstract" rows="10" placeholder="논문 초록을 입력하세요..."></textarea>
+            </div>
+            <div class="form-group">
+                <label for="maxLength">최대 요약 길이 (단어 수)</label>
+                <input type="number" id="maxLength" value="100" min="50" max="500">
+            </div>
+            <button onclick="summarizePaper()">요약 생성</button>
+        </div>
+
+        <div id="results"></div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8080/api/papers';
+
+        function switchTab(tab) {
+            // 모든 탭과 콘텐츠 비활성화
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+
+            // 선택된 탭 활성화
+            event.target.classList.add('active');
+            document.getElementById(`${tab}-tab`).classList.add('active');
+
+            // 결과 초기화
+            document.getElementById('results').innerHTML = '';
+        }
+
+        async function searchPapers() {
+            const category = document.getElementById('category').value;
+            const minImpactFactor = parseFloat(document.getElementById('minImpactFactor').value);
+            const maxResults = parseInt(document.getElementById('maxResults').value);
+            const fromDate = document.getElementById('fromDate').value;
+
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = '<div class="loading">검색 중...</div>';
+
+            try {
+                const response = await fetch(`${API_BASE}/search`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        category,
+                        minImpactFactor,
+                        maxResults,
+                        fromDate
+                    })
+                });
+
+                const data = await response.json();
+                displayPapers(data);
+            } catch (error) {
+                resultsDiv.innerHTML = `<div class="error">오류가 발생했습니다: ${error.message}</div>`;
+            }
+        }
+
+        function displayPapers(data) {
+            const resultsDiv = document.getElementById('results');
+
+            if (data.papers.length === 0) {
+                resultsDiv.innerHTML = '<p>검색 결과가 없습니다.</p>';
+                return;
+            }
+
+            let html = `<h2>검색 결과 (${data.totalResults}개)</h2>`;
+
+            data.papers.forEach(paper => {
+                html += `
+                    <div class="paper-card">
+                        <div class="paper-title">${paper.title}</div>
+                        <div class="paper-info">
+                            <strong>저널:</strong> ${paper.journal}
+                            ${paper.impactFactor ? `<span class="badge badge-if">IF: ${paper.impactFactor}</span>` : ''}
+                            ${paper.citations !== null ? `<span class="badge badge-citations">인용: ${paper.citations}</span>` : ''}
+                        </div>
+                        <div class="paper-info"><strong>저자:</strong> ${paper.authors.join(', ')}</div>
+                        ${paper.publicationDate ? `<div class="paper-info"><strong>발행일:</strong> ${paper.publicationDate}</div>` : ''}
+                        ${paper.doi ? `<div class="paper-info"><strong>DOI:</strong> <a href="https://doi.org/${paper.doi}" target="_blank">${paper.doi}</a></div>` : ''}
+                        ${paper.abstract ? `<div class="paper-abstract"><strong>초록:</strong> ${paper.abstract}</div>` : ''}
+                    </div>
+                `;
+            });
+
+            resultsDiv.innerHTML = html;
+        }
+
+        async function getTopJournals() {
+            const category = document.getElementById('journalCategory').value;
+            const minImpactFactor = parseFloat(document.getElementById('journalMinIF').value);
+
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = '<div class="loading">조회 중...</div>';
+
+            try {
+                const response = await fetch(`${API_BASE}/journals/${encodeURIComponent(category)}?minImpactFactor=${minImpactFactor}`);
+                const journals = await response.json();
+                displayJournals(journals);
+            } catch (error) {
+                resultsDiv.innerHTML = `<div class="error">오류가 발생했습니다: ${error.message}</div>`;
+            }
+        }
+
+        function displayJournals(journals) {
+            const resultsDiv = document.getElementById('results');
+
+            if (journals.length === 0) {
+                resultsDiv.innerHTML = '<p>해당 조건의 저널이 없습니다.</p>';
+                return;
+            }
+
+            let html = `<h2>저널 목록 (${journals.length}개)</h2><div class="journal-list">`;
+
+            journals.forEach(journal => {
+                html += `
+                    <div class="journal-card">
+                        <div class="journal-name">${journal.name}</div>
+                        ${journal.impactFactor ? `<div><span class="badge badge-if">Impact Factor: ${journal.impactFactor}</span></div>` : ''}
+                        <div style="margin-top: 10px;">
+                            <button onclick="searchByJournal('${journal.name}')">최신 논문 보기</button>
+                        </div>
+                    </div>
+                `;
+            });
+
+            html += '</div>';
+            resultsDiv.innerHTML = html;
+        }
+
+        async function searchByJournal(journalName) {
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = '<div class="loading">검색 중...</div>';
+
+            try {
+                const response = await fetch(`${API_BASE}/journal/${encodeURIComponent(journalName)}?maxResults=10`);
+                const papers = await response.json();
+                displayPapers({ papers, totalResults: papers.length, category: journalName });
+            } catch (error) {
+                resultsDiv.innerHTML = `<div class="error">오류가 발생했습니다: ${error.message}</div>`;
+            }
+        }
+
+        async function summarizePaper() {
+            const abstract = document.getElementById('abstract').value;
+            const maxLength = parseInt(document.getElementById('maxLength').value);
+
+            if (!abstract.trim()) {
+                alert('논문 초록을 입력해주세요.');
+                return;
+            }
+
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = '<div class="loading">AI가 요약을 생성하고 있습니다...</div>';
+
+            try {
+                const response = await fetch(`${API_BASE}/summarize`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        abstract,
+                        maxLength
+                    })
+                });
+
+                const data = await response.json();
+                resultsDiv.innerHTML = `
+                    <h2>요약 결과</h2>
+                    <div class="paper-card">
+                        <div class="paper-abstract">${data.summary}</div>
+                    </div>
+                `;
+            } catch (error) {
+                resultsDiv.innerHTML = `<div class="error">오류가 발생했습니다: ${error.message}<br>OpenAI API 키가 설정되어 있는지 확인해주세요.</div>`;
+            }
+        }
+    </script>
+</body>
+</html>
+

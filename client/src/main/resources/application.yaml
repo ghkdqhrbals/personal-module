@@ -1,0 +1,59 @@
+spring:
+  application:
+    name: client
+  config:
+    import:
+      - optional:aws-secretsmanager:personal/beta
+  cloud:
+    aws:
+      region:
+        static: ap-northeast-2
+      credentials:
+        profile:
+          name: default
+      secretsmanager:
+        enabled: true
+        fail-fast: false
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://database-1.chmscg6ww41e.ap-northeast-2.rds.amazonaws.com:3306/paper?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.MySQLDialect
+
+# AI 설정
+ai:
+  provider: ollama  # 'openai' 또는 'ollama' 선택
+
+# OpenAI 설정 (ai.provider=openai 일 때 사용)
+openai:
+  api:
+    key: ${OPENAI_API_KEY:}
+
+# Ollama 설정 (ai.provider=ollama 일 때 사용)
+ollama:
+  url: http://localhost:11434
+  model: gemma3
+
+serpapi:
+  key: ${SERPAPI_KEY:}
+
+# 로깅 설정
+logging:
+  level:
+    org.hibernate.engine.jdbc.env.internal.LobCreatorBuilderImpl: ERROR
+    org.hibernate.SQL: ERROR
+    org.hibernate: WARN
+
+redis:
+  host: localhost
+  port: 6379
+  stream:
+    summary: paper:summary:stream
+    group: paper-summary-group
+    consumer: paper-summary-consumer-1

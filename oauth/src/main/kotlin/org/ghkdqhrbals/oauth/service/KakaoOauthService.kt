@@ -14,12 +14,15 @@ import java.nio.charset.StandardCharsets
 @Service
 internal class KakaoOauthService(
     private val client: RestClient,
-    private val registry: OauthProviderRegistry,
-): OAuthService(OauthProviderKind.KAKAO) {
+    registry: OauthProviderRegistry,
+): OAuthService(
+    provider = OauthProviderKind.KAKAO,
+    registry = registry
+) {
     override fun buildAuthorizationUrl(state: String?): String {
         val scopesEncoded = URLEncoder.encode(config.scopes.joinToString(" "), StandardCharsets.UTF_8)
         val uri = UriComponentsBuilder
-            .fromHttpUrl("${config.codePath}")
+            .fromHttpUrl("${config.authorizationUri}")
             .queryParam("client_id", config.clientId)
             .queryParam("redirect_uri", config.redirectUri)
             .queryParam("response_type", "code")
@@ -29,8 +32,6 @@ internal class KakaoOauthService(
         return uri
     }
 
-    final override fun providerKind() = OauthProviderKind.KAKAO
-    private val config = registry.require(providerKind())
 
     override fun fetchUserInfo(accessToken: String): OAuthUserInfo {
         val url = config.userInfoPath ?: error("userInfoPath not configured for KAKAO")
@@ -41,7 +42,7 @@ internal class KakaoOauthService(
             .body(Map::class.java) as Map<*, *>
         return OAuthUserInfo(
             providerId = response["id"].toString(),
-            provider = providerKind(),
+            provider = provider,
             rawAttributes = response.filterKeys { it is String } as Map<String, Any>
         )
     }
@@ -65,7 +66,7 @@ internal class KakaoOauthService(
         return tokenResponse?.get("access_token")?.toString()?: throw BadRequestException("Failed to get access token")
     }
 
-    override fun revoke(accessToken: String) {
+    override fun tokenRevoke(accessToken: String) {
         val url = "https://kapi.kakao.com/v1/user/unlink"
         client.post()
             .uri(url)
