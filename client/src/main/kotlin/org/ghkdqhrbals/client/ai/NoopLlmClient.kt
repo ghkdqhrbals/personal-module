@@ -1,13 +1,9 @@
 package org.ghkdqhrbals.client.ai
 
 import org.ghkdqhrbals.client.paper.dto.PaperAnalysisResponse
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
-import org.springframework.stereotype.Component
 
-@Component
-@ConditionalOnMissingBean(LlmClient::class)
 class NoopLlmClient : LlmClient {
-    override fun createChatCompletion(request: ChatRequest): ChatResponse {
+    override suspend fun createChatCompletion(request: ChatRequest): ChatResponse {
         return ChatResponse(
             id = null,
             choices = listOf(Choice(message = Message(role = "assistant", content = ""))),

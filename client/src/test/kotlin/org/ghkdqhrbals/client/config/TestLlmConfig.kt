@@ -16,7 +16,7 @@ class TestLlmConfig {
     @Primary
     fun testLlmClient(): LlmClient {
         return object : LlmClient {
-            override fun createChatCompletion(request: ChatRequest): ChatResponse {
+            override suspend fun createChatCompletion(request: ChatRequest): ChatResponse {
                 return ChatResponse(
                     id = "test-id",
                     choices = listOf(

@@ -1,10 +1,11 @@
 package org.ghkdqhrbals.client.ai
 
+import kotlinx.coroutines.runBlocking
 import org.ghkdqhrbals.client.config.logger
 import org.ghkdqhrbals.client.paper.dto.PaperAnalysisResponse
 
 interface LlmClient {
-    fun createChatCompletion(request: ChatRequest): ChatResponse
+    suspend fun createChatCompletion(request: ChatRequest): ChatResponse
 
     /**
      * 논문 초록과 journal_ref를 요약하고 저널 정보를 추출합니다
@@ -13,7 +14,7 @@ interface LlmClient {
         abstract: String,
         maxLength: Int = 150,
         journalRef: String? = null
-    ): PaperAnalysisResponse {
+    ): PaperAnalysisResponse = runBlocking {
         val journalPrompt = if (!journalRef.isNullOrBlank()) {
             """
             
@@ -27,7 +28,7 @@ interface LlmClient {
         } else ""
 
         val request = ChatRequest(
-            model = "gpt-4o-mini",
+            model = "gpt-4o-mini",  // OpenAI용, Ollama 사용 시에는 ovarride됨
             messages = listOf(
                 Message(
                     role = "system",
@@ -53,7 +54,6 @@ interface LlmClient {
                     - 전체 분량은 공백 포함 $maxLength 자 이내로 유지합니다.
                     - 문체는 자연스럽고 읽기 쉽게 유지합니다.
                     - "이 논문은", "저자들은" 등 학술적 서론 문장은 제외합니다.
-                    - reasoning_effort=medium 수준으로 핵심만 구조적으로 도출합니다.
                     
                     ### 출력 형식(JSON only):
                     {
@@ -76,8 +76,18 @@ interface LlmClient {
 
         val response = createChatCompletion(request)
         val raw = response.choices.firstOrNull()?.message?.content
+
+        // LLM이 JSON을 코드블록으로 감싸는 경우를 처리
+        val cleanedJson = raw?.let { content ->
+            content.trim()
+                .removePrefix("```json")
+                .removePrefix("```")
+                .removeSuffix("```")
+                .trim()
+        }
+
         val mapper = com.fasterxml.jackson.databind.ObjectMapper()
-        val node = mapper.readTree(raw)
+        val node = mapper.readTree(cleanedJson)
         val core = node["core_contribution"]?.asText()?.trim() ?: ""
         val novelty = node["novelty_against_previous_works"]?.asText()?.trim() ?: ""
         val journal = node["journal_name"]?.asText()?.takeIf { it != "null" }
@@ -95,8 +105,9 @@ interface LlmClient {
                 impactFactorYear = ifYear
             )
             logger().info("Summarized  $map")
-            return map
+            map
+        } else {
+            throw IllegalStateException("Failed to summarize paper abstract. Response: $raw")
         }
-        throw IllegalStateException("Failed to summarize paper abstract. Response: $raw")
     }
 }

@@ -12,24 +12,12 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import org.ghkdqhrbals.client.config.logger
-import org.springframework.beans.factory.annotation.Value
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
-import org.springframework.context.annotation.Primary
-import org.springframework.stereotype.Component
 import kotlin.time.Duration.Companion.seconds
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.max
 
-@Component
-@ConditionalOnProperty(
-    prefix = "openai",
-    name = ["enabled"],
-    havingValue = "true",
-    matchIfMissing = false
-)
-@Primary
 class OpenAiClientImpl(
-    @Value("\${openai.api.key}") private val apiKey: String
+    private val apiKey: String
 ) : LlmClient {
 
     private val httpClientConfig: HttpClientConfig<*>.() -> Unit = {
@@ -61,10 +49,10 @@ class OpenAiClientImpl(
     private val currentMaxPermits = AtomicInteger(3)
     private val semaphore = Semaphore(6)
 
-    override fun createChatCompletion(request: ChatRequest): ChatResponse = runBlocking {
+    override suspend fun createChatCompletion(request: ChatRequest): ChatResponse {
         adjustSemaphoreFromRateLimit()
 
-        semaphore.withPermit {
+        return semaphore.withPermit {
             val remaining = OpenAiHttpConfig.rateLimitRemaining.get()
             val limit = OpenAiHttpConfig.rateLimitLimit.get()
             val availablePermits = semaphore.availablePermits
@@ -137,4 +125,5 @@ class OpenAiClientImpl(
         }
     }
 }
+
 

@@ -41,7 +41,8 @@ data class PaperSearchResponse(
     val source: String, // "arXiv", "CrossRef", "Google Scholar" 등
     val page: Int? = null,  // 현재 페이지 번호
     val size: Int? = null,  // 페이지 크기
-    val totalResults: Int? = null  // 전체 결과 수 (arXiv opensearch:totalResults)
+    val totalResults: Int? = null,  // 전체 결과 수 (arXiv opensearch:totalResults)
+    val eventId: String? = null // 요약 비동기 이벤트 ID
 )
 
 /**

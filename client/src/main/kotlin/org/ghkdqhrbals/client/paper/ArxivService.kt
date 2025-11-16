@@ -15,20 +15,24 @@ import org.springframework.http.HttpEntity
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpMethod
 import com.rometools.rome.feed.synd.SyndEntryImpl
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
-import kotlinx.coroutines.runBlocking
+import org.ghkdqhrbals.client.paper.entity.PaperEntity
 import org.ghkdqhrbals.client.paper.repository.PaperRepository
 import org.jdom2.Element
 import org.springframework.transaction.annotation.Transactional
+import org.ghkdqhrbals.client.paper.queue.SummaryQueueProducer
+import org.ghkdqhrbals.client.paper.queue.SummaryJobRequest
+import java.util.UUID
 
 @Service
 class ArxivService(
     private val restTemplate: RestTemplate,
+    // llm은 향후 동기 처리 경로나 즉시 응답 모드 전환에 대비해 유지
     private val llm: LlmClient,
     private val dedup: DedupService,
+    // metricProvider 역시 후속 확장을 위해 유지
     private val metricProvider: JournalMetricProvider,
     private val repository: PaperRepository,
+    private val summaryQueueProducer: SummaryQueueProducer,
 ) {
 
     @Transactional
@@ -126,47 +130,34 @@ class ArxivService(
             logger().info("arXiv result[$idx] title='${p.title}', date='${p.publicationDate}', url='${p.url}'")
         }
 
-        // 병렬로 요약 생성 및 저널 정보 추출
-        val processed = runBlocking {
-            papers.map { p ->
-                async {
-                    // 존재하면 요약 스킵
-                    if (dedup.alreadyExists(p)) {
-                        logger().info("Skip LLM (exists): ${p.url ?: p.title}")
-                        p
-                    } else if (summarize && !p.abstract.isNullOrBlank()) {
-                        logger().info("Start LLM summary for: ${p.title}")
-                        val analysis = runCatching {
-                            llm.summarizePaper(p.abstract, 120, p.journalRefRaw)
-                        }
-                            .onSuccess { logger().info("Completed LLM summary for: ${p.title}") }
-                            .onFailure { e -> logger().warn("summary failed for '${p.title}': ${e.message}") }
-                            .getOrNull()
+        // 병렬로 요약 생성 및 저널 정보 추출 -> 이제 비동기 큐에 적재
+        val eventId = if (summarize) UUID.randomUUID().toString() else null
+        if (eventId != null) {
+            runCatching { summaryQueueProducer.enqueueProgressInit(eventId) }
+                .onFailure { logger().warn("Progress init failed eventId=$eventId err=${it.message}") }
+        }
 
-                        val journalName = analysis?.journalName
-                        val year = analysis?.year ?: p.publicationDate?.substring(0, 4)?.toIntOrNull()
-
-                        // LLM이 제공한 IF를 우선 사용, 없으면 OpenAlex로 보강
-                        val (ifValue, ifYear) = if (analysis?.impactFactor != null) {
-                            analysis.impactFactor to (analysis.impactFactorYear ?: year)
-                        } else if (journalName != null) {
-                            val fromApi = metricProvider.getLatestImpactMetric(journalName, year)
-                            (fromApi?.first) to (fromApi?.second)
-                        } else null to null
-
-                        if (ifValue != null) {
-                            logger().info("Impact Factor resolved: journal='${journalName}', IF=$ifValue (year=${ifYear})")
-                        }
-
-                        p.copy(
-                            summary = analysis?.coreContribution,
-                            novelty = analysis?.noveltyAgainstPreviousWorks,
-                            journal = journalName ?: p.journal ?: "arXiv",
-                            impactFactor = ifValue ?: p.impactFactor
-                        )
-                    } else p
-                }
-            }.awaitAll()
+        val processed = papers.map { p ->
+            if (dedup.alreadyExists(p)) {
+                logger().info("Skip enqueue (exists): ${p.url ?: p.title}")
+                p
+            } else if (summarize && !p.abstract.isNullOrBlank()) {
+                summaryQueueProducer.enqueue(
+                    SummaryJobRequest(
+                        arxivId = p.url?.let { url -> Regex("arxiv\\.org/abs/([0-9.]+(?:v[0-9]+)?)").find(url)?.groupValues?.getOrNull(1) },
+                        title = p.title,
+                        abstract = p.abstract,
+                        journalRefRaw = p.journalRefRaw,
+                        maxLength = 120,
+                        eventId = eventId
+                    )
+                )
+                p.copy(journal = p.journal ?: "arXiv")
+            } else p
+        }
+        if (eventId != null) {
+            val totalQueued = processed.count { it.summary == null && summarize && !it.abstract.isNullOrBlank() }
+            summaryQueueProducer.updateTotal(eventId, totalQueued)
         }
 
         val entitiesToSave = processed.map { p ->
@@ -174,7 +165,7 @@ class ArxivService(
                 val regex = Regex("arxiv\\.org/abs/([0-9.]+(?:v[0-9]+)?)")
                 regex.find(url)?.groupValues?.getOrNull(1)
             }
-            org.ghkdqhrbals.client.paper.entity.PaperEntity(
+            PaperEntity(
                 arxivId = arxivId,
                 title = p.title.take(255),
                 author = p.authors.joinToString(", ").take(255),
@@ -207,7 +198,8 @@ class ArxivService(
             source = "arXiv",
             page = page,
             size = maxResults,
-            totalResults = totalResults
+            totalResults = totalResults,
+            eventId = eventId
         )
     }
 

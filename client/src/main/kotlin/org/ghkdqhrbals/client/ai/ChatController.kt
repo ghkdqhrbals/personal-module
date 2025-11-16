@@ -15,7 +15,7 @@ class ChatController(
 
     @PostMapping("/completions")
     @Operation(summary = "Chat Completions", description = "메시지 배열을 기반으로 OpenAI 채팅 응답을 생성합니다")
-    fun createChatCompletion(
+    suspend fun createChatCompletion(
         @RequestBody request: ChatRequest
     ): ResponseEntity<ChatResponse> {
         val response = openAiClientImpl.createChatCompletion(request)
@@ -24,7 +24,7 @@ class ChatController(
 
     @PostMapping("/send")
     @Operation(summary = "간단 메시지 전송", description = "단일 텍스트로 모델에 질문하고 답변을 받습니다")
-    fun sendMessage(
+    suspend fun sendMessage(
         @RequestBody textRequest: TextRequest
     ): ResponseEntity<TextResponse> {
         val chatRequest = ChatRequest(

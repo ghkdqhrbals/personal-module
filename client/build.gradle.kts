@@ -97,6 +97,8 @@ dependencies {
     implementation("com.rometools:rome:2.1.0")
     // HTML sanitize
     implementation("org.jsoup:jsoup:1.17.2")
+    implementation("org.springframework.boot:spring-boot-starter-data-redis")
+    implementation("org.springframework.boot:spring-boot-starter-actuator")
 }
 
 kotlin {

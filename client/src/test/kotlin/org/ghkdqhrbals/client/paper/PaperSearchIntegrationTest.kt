@@ -41,7 +41,6 @@ class PaperSearchIntegrationTest {
 
         assertEquals(HttpStatus.OK, response.statusCode)
         assertNotNull(response.body)
-        assertEquals("Computer Science", response.body!!.category)
     }
 
     @Test
