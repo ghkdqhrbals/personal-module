@@ -4,16 +4,13 @@ import com.rometools.rome.io.SyndFeedInput
 import com.rometools.rome.io.XmlReader
 import org.jsoup.Jsoup
 import org.springframework.stereotype.Service
-import org.springframework.web.client.RestTemplate
+import org.springframework.web.client.RestClient
 import org.springframework.web.util.UriComponentsBuilder
 import java.io.ByteArrayInputStream
 import java.nio.charset.StandardCharsets
 import java.time.LocalDate
 import org.ghkdqhrbals.client.ai.LlmClient
 import org.ghkdqhrbals.client.config.logger
-import org.springframework.http.HttpEntity
-import org.springframework.http.HttpHeaders
-import org.springframework.http.HttpMethod
 import com.rometools.rome.feed.synd.SyndEntryImpl
 import org.ghkdqhrbals.client.paper.entity.PaperEntity
 import org.ghkdqhrbals.client.paper.repository.PaperRepository
@@ -21,16 +18,17 @@ import org.jdom2.Element
 import org.springframework.transaction.annotation.Transactional
 import org.ghkdqhrbals.client.paper.queue.SummaryQueueProducer
 import org.ghkdqhrbals.client.paper.queue.SummaryJobRequest
+import org.springframework.http.MediaType
 import java.util.UUID
+
+import org.springframework.beans.factory.annotation.Qualifier
 
 @Service
 class ArxivService(
-    private val restTemplate: RestTemplate,
+    @Qualifier("plainClient") private val plainClient: RestClient,
     // llm은 향후 동기 처리 경로나 즉시 응답 모드 전환에 대비해 유지
     private val llm: LlmClient,
     private val dedup: DedupService,
-    // metricProvider 역시 후속 확장을 위해 유지
-    private val metricProvider: JournalMetricProvider,
     private val repository: PaperRepository,
     private val summaryQueueProducer: SummaryQueueProducer,
 ) {
@@ -59,20 +57,23 @@ class ArxivService(
 
         logger().info("arXiv request url=$url (page=$page, start=$start, size=$maxResults)")
 
-        val xml = try {
-            val headers = HttpHeaders()
-            headers["User-Agent"] = "ghkdqhrbals-arxiv-client/1.0"
-
-            val entity = HttpEntity<String>(headers)
-
-            val xmls = restTemplate.exchange(url, HttpMethod.GET, entity, String::class.java)
-            val xml = xmls.body
-
-            xml
+        val xmlBytes = try {
+            plainClient.get()
+                .uri(url)
+                .accept(MediaType.APPLICATION_ATOM_XML)
+                .retrieve()
+                .body(ByteArray::class.java)
         } catch (e: Exception) {
-            logger().error("arXiv HTTP error: ${e.message}")
+            logger().error("arXiv HTTP request failed: ${e.message}", e)
             return PaperSearchResponse(emptyList(), 0, "arXiv")
-        } ?: return PaperSearchResponse(emptyList(), 0, "arXiv")
+        }
+
+        if (xmlBytes == null || xmlBytes.isEmpty()) {
+            logger().error("arXiv returned null or empty response for url=$url")
+            return PaperSearchResponse(emptyList(), 0, "arXiv")
+        }
+
+        val xml = String(xmlBytes, Charsets.UTF_8)
 
         logOpenSearchMeta(xml)
 

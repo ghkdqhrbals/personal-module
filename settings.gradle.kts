@@ -7,5 +7,6 @@ include(
     ":oauth",
     ":time",
     ":client",
+    ":batch",
 )
 

@@ -26,7 +26,7 @@ spring:
         format_sql: true
         dialect: org.hibernate.dialect.MySQLDialect
 
-# AI 설정
+# AI 설정s
 ai:
   provider: ollama  # 'openai' 또는 'ollama' 선택
 
@@ -37,7 +37,7 @@ openai:
 
 # Ollama 설정 (ai.provider=ollama 일 때 사용)
 ollama:
-  url: http://localhost:11434
+  url: http://[::1]:11434
   model: gemma3
 
 serpapi:
@@ -56,4 +56,6 @@ redis:
   stream:
     summary: paper:summary:stream
     group: paper-summary-group
-    consumer: paper-summary-consumer-1
+    consumer:
+      name: paper-summary-consumer-1
+      threads: 50

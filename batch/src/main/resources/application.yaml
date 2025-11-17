@@ -1,0 +1,35 @@
+spring:
+  application:
+    name: batch
+
+  datasource:
+    url: jdbc:mysql://localhost:3306/paper_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    username: root
+    password: password
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: none
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.MySQL8Dialect
+
+  batch:
+    jdbc:
+      initialize-schema: always
+    job:
+      enabled: false  # 자동 실행 방지
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+logging:
+  level:
+    org.springframework.batch: INFO
+    org.ghkdqhrbals.batch: DEBUG
+

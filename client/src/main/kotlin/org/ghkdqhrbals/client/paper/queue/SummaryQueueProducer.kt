@@ -48,13 +48,17 @@ class SummaryQueueProducer(
             "completed" to "0",
             "failed" to "0"
         ))
-        logger().info("[STREAM] Init progress batchId=$batchId")
+        // TTL 1분 설정
+        redisTemplate.expire(key, 60, java.util.concurrent.TimeUnit.SECONDS)
+        logger().info("[STREAM] Init progress batchId=$batchId (TTL: 60s)")
     }
 
     fun updateTotal(batchId: String, total: Int) {
         val key = "batch:$batchId:progress"
         redisTemplate.opsForHash<String, String>().put(key, "total", total.toString())
-        logger().info("[STREAM] Set total=$total batchId=$batchId")
+        // TTL 1분 재설정 (갱신)
+        redisTemplate.expire(key, 60, java.util.concurrent.TimeUnit.SECONDS)
+        logger().info("[STREAM] Set total=$total batchId=$batchId (TTL: 60s)")
     }
 
     fun incrCompleted(batchId: String) {
