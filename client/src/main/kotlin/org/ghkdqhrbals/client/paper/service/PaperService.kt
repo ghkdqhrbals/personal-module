@@ -14,7 +14,7 @@ class PaperService(
      */
     @Transactional
     fun upsertPapersAndGetUnsummarized(papers: List<PaperEntity>): List<PaperEntity> {
-        val foundPapers = paperRepository.findAllByArxivIdIn(papers.map { it.arxivId })
+        val foundPapers = paperRepository.findAllByArxivIdIn(papers.mapNotNull { it.arxivId })
         val map = foundPapers.associateBy { it.arxivId }
         val new = papers.filter { newPaper ->
             map[newPaper.arxivId] == null
