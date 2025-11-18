@@ -1,6 +1,9 @@
 spring:
   application:
     name: client
+  output:
+    ansi:
+      enabled: ALWAYS
   config:
     import:
       - optional:aws-secretsmanager:personal/beta
@@ -19,7 +22,7 @@ spring:
     url: jdbc:mysql://database-1.chmscg6ww41e.ap-northeast-2.rds.amazonaws.com:3306/paper?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: none
     show-sql: false
     properties:
       hibernate:
@@ -37,18 +40,26 @@ openai:
 
 # Ollama 설정 (ai.provider=ollama 일 때 사용)
 ollama:
-  url: http://[::1]:11434
+  url: http://127.0.0.1:11434
   model: gemma3
 
 serpapi:
   key: ${SERPAPI_KEY:}
 
-# 로깅 설정
-logging:
-  level:
-    org.hibernate.engine.jdbc.env.internal.LobCreatorBuilderImpl: ERROR
-    org.hibernate.SQL: ERROR
-    org.hibernate: WARN
+## 로깅 설정
+#logging:
+#  level:
+#    org.hibernate.engine.jdbc.env.internal.LobCreatorBuilderImpl: ERROR
+#    org.hibernate.SQL: ERROR
+#    org.hibernate: WARN
+
+# arXiv API 재시도 설정
+arxiv:
+  retry:
+    max-retries: 3
+    initial-delay-ms: 2000
+    rate-limit-multiplier: 2
+    exponential-backoff: true
 
 redis:
   host: localhost
@@ -56,6 +67,11 @@ redis:
   stream:
     summary: paper:summary:stream
     group: paper-summary-group
+    # 이벤트 타입별 개별 스트림 (단순화)
+    events:
+      paper-search-and-store: domain:events:paper-search-and-store
+      summary: domain:events:summary
+      group: event-handlers
     consumer:
       name: paper-summary-consumer-1
       threads: 50

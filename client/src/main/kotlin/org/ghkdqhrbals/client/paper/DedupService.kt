@@ -18,6 +18,18 @@ class DedupService(
         return false
     }
 
+    /**
+     * 이미 요약이 완료된 논문인지 확인
+     */
+    fun alreadySummarized(arxivId: String?): Boolean {
+        if (arxivId.isNullOrBlank()) return false
+
+        val paper = paperRepository.findByArxivId(arxivId).orElse(null) ?: return false
+
+        // summary 필드가 비어있지 않으면 이미 요약 완료
+        return !paper.summary.isNullOrBlank()
+    }
+
     private fun extractArxivId(url: String?): String? {
         if (url.isNullOrBlank()) return null
         val regex = Regex("arxiv\\.org/abs/([0-9.]+(?:v[0-9]+)?)")

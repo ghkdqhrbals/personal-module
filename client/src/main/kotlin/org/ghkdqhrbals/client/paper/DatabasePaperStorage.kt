@@ -24,7 +24,7 @@ class DatabasePaperStorage(
 
             val entity = PaperEntity(
                 arxivId = arxivId,
-                title = paper.title.take(255),
+                title = paper.title?.take(255),
                 author = paper.authors.joinToString(", ").take(255),
                 publishedAt = paper.publicationDate?.let { parseDate(it) },
                 searchDate = LocalDate.now(),

@@ -18,7 +18,7 @@ data class PaperSearchRequest(
  * 논문 정보
  */
 data class Paper(
-    val title: String,
+    val title: String?,
     val authors: List<String>,
     val journal: String?,
     val publicationDate: String?,
@@ -43,6 +43,40 @@ data class PaperSearchResponse(
     val size: Int? = null,  // 페이지 크기
     val totalResults: Int? = null,  // 전체 결과 수 (arXiv opensearch:totalResults)
     val eventId: String? = null // 요약 비동기 이벤트 ID
+)
+
+/**
+ * arXiv 검색 상태 응답
+ */
+data class ArxivSearchStatusResponse(
+    val eventId: String,
+    val status: SearchStatus,
+    val batch: BatchInfo?,
+    val summary: SummaryInfo?,
+    val papers: List<Paper>?
+)
+
+enum class SearchStatus {
+    PENDING,        // 검색 대기 중
+    IN_PROGRESS,    // 검색/요약 진행 중
+    COMPLETED,      // 완료
+    FAILED,         // 실패
+    NOT_FOUND       // 이벤트 없음
+}
+
+data class BatchInfo(
+    val totalPapers: Int,
+    val category: String?,
+    val startedAt: String?
+)
+
+data class SummaryInfo(
+    val total: Int,
+    val completed: Int,
+    val failed: Int,
+    val processing: Int,
+    val progressPercent: Double,
+    val isDone: Boolean
 )
 
 /**

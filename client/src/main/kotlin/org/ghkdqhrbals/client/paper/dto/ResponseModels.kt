@@ -27,7 +27,7 @@ data class PaperAnalysisResponse(
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 data class PaperResponse(
-    val title: String,
+    val title: String?,
     val authors: List<String>,
     val journal: String?,
     val publicationDate: String?,

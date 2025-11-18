@@ -10,9 +10,9 @@ services:
       - ./entrypoint.sh:/entrypoint.sh
     environment:
       - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma3}
-      - OLLAMA_NUM_PARALLEL=64
+      - OLLAMA_NUM_PARALLEL=16
       - OLLAMA_MAX_LOADED_MODELS=4
-      - OLLAMA_MAX_QUEUE=512
+      - OLLAMA_MAX_QUEUE=16
       - OLLAMA_KEEP_ALIVE=5m
     entrypoint: ["/bin/bash", "/entrypoint.sh"]
     healthcheck:

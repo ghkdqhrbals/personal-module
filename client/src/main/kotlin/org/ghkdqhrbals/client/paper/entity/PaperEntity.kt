@@ -11,8 +11,8 @@ data class PaperEntity(
     @Column(name = "id")
     val id: Long? = null,
 
-    @Column(name = "arxiv_id", unique = true, length = 32)
-    val arxivId: String? = null,
+    @Column(name = "arxiv_id", length = 32)
+    val arxivId: String?,
 
     @Column(name = "title")
     val title: String? = null,

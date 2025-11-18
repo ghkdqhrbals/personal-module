@@ -6,6 +6,9 @@ import org.springframework.web.client.RestClient
 import java.util.concurrent.atomic.AtomicInteger
 import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonInclude.Include
+import org.ghkdqhrbals.client.config.setting
+
+import org.ghkdqhrbals.client.config.title
 
 /**
  * Ollama 로컬 모델을 사용하는 LLM 클라이언트 - RestClient 기반
@@ -17,7 +20,7 @@ class OllamaClientImpl(
 ) : LlmClient {
 
     init {
-        logger().info("🚀 OllamaClientImpl 초기화: ollamaUrl=$ollamaUrl, modelName=$modelName")
+        logger().setting("ollamaUrl=$ollamaUrl, modelName=$modelName")
     }
 
     private val activeRequests = AtomicInteger(0)
