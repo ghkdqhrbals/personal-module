@@ -21,11 +21,19 @@ class ArxivController(
         val summarize: Boolean? = true
     )
 
+    data class ArxivSearchResponse(
+        val eventId: String,
+        val message: String = "Search initiated. Use GET /api/papers/arxiv/search/{eventId}/status to check progress."
+    )
+
     @PostMapping("/search")
-    @Operation(summary = "arXiv 검색 (페이지네이션)", description = "arXiv에서 최신 논문 검색. page=0부터 시작, maxResults는 페이지 크기")
-    fun search(@RequestBody req: ArxivSearchRequest): ResponseEntity<PaperSearchResponse> {
+    @Operation(
+        summary = "arXiv 비동기 검색 시작",
+        description = "arXiv 논문 검색을 시작하고 이벤트 ID를 즉시 반환. 상태 조회는 GET /api/papers/arxiv/search/{eventId}/status 사용"
+    )
+    fun search(@RequestBody req: ArxivSearchRequest): ResponseEntity<ArxivSearchResponse> {
         logger().info("arXiv Search Request: $req (page=${req.page}, size=${req.maxResults})")
-        val res = arxivService.search(
+        val eventId = arxivService.searchAsync(
             query = req.query,
             categories = req.categories,
             maxResults = req.maxResults,
@@ -33,6 +41,18 @@ class ArxivController(
             fromDate = req.fromDate,
             summarize = req.summarize ?: true
         )
-        return ResponseEntity.ok(res)
+        return ResponseEntity.accepted().body(
+            ArxivSearchResponse(eventId = eventId)
+        )
+    }
+
+    @GetMapping("/search/{eventId}/status")
+    @Operation(
+        summary = "arXiv 검색 상태 조회",
+        description = "이벤트 ID로 검색 진행 상태 및 결과 조회"
+    )
+    fun getSearchStatus(@PathVariable eventId: String): ResponseEntity<ArxivSearchStatusResponse> {
+        val status = arxivService.getSearchStatus(eventId)
+        return ResponseEntity.ok(status)
     }
 }

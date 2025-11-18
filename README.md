@@ -42,6 +42,51 @@ class LoginController(private val kakao: KakaoOauthService) {
 }
 ```
 
+## Local Development
+
+### Prerequisites
+- Java 17+
+- Redis (running on localhost:6379)
+- Ollama (https://ollama.ai)
+
+### Quick Start (All Services)
+
+```bash
+# Start Redis (if not running)
+brew services start redis
+# or: redis-server
+
+# Start everything (Ollama + Spring Boot Client)
+./start-all.sh
+```
+
+This script will:
+1. ✅ Check prerequisites (Java, Ollama, Redis)
+2. 🚀 Start Ollama server and load gemma3 model
+3. 🏗️ Build Spring Boot client module
+4. 🚀 Start Spring Boot application
+
+### Individual Scripts
+
+```bash
+# Start only Ollama
+./start-ollama.sh
+
+# Start only Spring Boot Client
+./start-client.sh
+```
+
+### Environment Variables
+
+```bash
+# Ollama configuration (optional)
+export OLLAMA_MODEL=gemma3        # default: gemma3
+export OLLAMA_PORT=11434          # default: 11434
+
+# Spring profiles
+export SPRING_PROFILES_ACTIVE=local
+```
+
 ## Demo
 Run and open http://localhost:8080/oauth2
 

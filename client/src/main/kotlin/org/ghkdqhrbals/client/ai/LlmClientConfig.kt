@@ -1,10 +1,11 @@
 package org.ghkdqhrbals.client.ai
 
+import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
-import org.springframework.web.client.RestTemplate
+import org.springframework.web.client.RestClient
 
 @Configuration
 class LlmClientConfig {
@@ -38,11 +39,11 @@ class LlmClientConfig {
         matchIfMissing = false
     )
     fun ollamaLlmClient(
-        @Value("\${ollama.url}") ollamaUrl: String,
+        @Qualifier("resolvedOllamaUrl") ollamaUrl: String,
         @Value("\${ollama.model}") modelName: String,
-        restTemplate: RestTemplate
+        @Qualifier("ollamaRestClient") restClient: RestClient
     ): LlmClient {
-        return OllamaClientImpl(ollamaUrl, modelName, restTemplate)
+        return OllamaClientImpl(modelName, ollamaUrl, restClient)
     }
 
     /**
@@ -60,4 +61,3 @@ class LlmClientConfig {
         return NoopLlmClient()
     }
 }
-

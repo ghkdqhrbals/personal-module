@@ -1,6 +1,5 @@
 package org.ghkdqhrbals.client.ai
 
-import kotlinx.coroutines.runBlocking
 import org.ghkdqhrbals.client.config.logger
 import org.ghkdqhrbals.client.paper.dto.PaperAnalysisResponse
 
@@ -10,11 +9,11 @@ interface LlmClient {
     /**
      * 논문 초록과 journal_ref를 요약하고 저널 정보를 추출합니다
      */
-    fun summarizePaper(
+    suspend fun summarizePaper(
         abstract: String,
         maxLength: Int = 150,
         journalRef: String? = null
-    ): PaperAnalysisResponse = runBlocking {
+    ): PaperAnalysisResponse {
         val journalPrompt = if (!journalRef.isNullOrBlank()) {
             """
             
@@ -96,7 +95,7 @@ interface LlmClient {
         val ifYear = node["impact_factor_year"]?.asInt()
 
         if (core.isNotBlank() || novelty.isNotBlank() || journal != null || ifv != null) {
-            val map = PaperAnalysisResponse(
+            val result = PaperAnalysisResponse(
                 coreContribution = core,
                 noveltyAgainstPreviousWorks = novelty,
                 journalName = journal,
@@ -104,8 +103,8 @@ interface LlmClient {
                 impactFactor = ifv,
                 impactFactorYear = ifYear
             )
-            logger().info("Summarized  $map")
-            map
+            logger().info("Summarized  $result")
+            return result
         } else {
             throw IllegalStateException("Failed to summarize paper abstract. Response: $raw")
         }

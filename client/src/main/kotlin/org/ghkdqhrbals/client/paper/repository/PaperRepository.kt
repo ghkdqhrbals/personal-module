@@ -9,4 +9,6 @@ interface PaperRepository : JpaRepository<PaperEntity, Long> {
     fun findByArxivId(arxivId: String): Optional<PaperEntity>
     fun existsByArxivId(arxivId: String): Boolean
     fun existsByUrl(url: String): Boolean
+    fun findTop100ByOrderBySearchDateDesc(): List<PaperEntity>
+    fun findAllByArxivIdIn(arxivIds: List<String>): List<PaperEntity>
 }

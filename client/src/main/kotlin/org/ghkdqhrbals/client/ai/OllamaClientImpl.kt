@@ -1,114 +1,135 @@
 package org.ghkdqhrbals.client.ai
 
+import org.ghkdqhrbals.client.config.Jackson
 import org.ghkdqhrbals.client.config.logger
-import org.springframework.web.client.RestTemplate
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
+import org.springframework.web.client.RestClient
 import java.util.concurrent.atomic.AtomicInteger
+import com.fasterxml.jackson.annotation.JsonInclude
+import com.fasterxml.jackson.annotation.JsonInclude.Include
+import org.ghkdqhrbals.client.config.setting
+
+import org.ghkdqhrbals.client.config.title
 
 /**
- * Ollama 로컬 모델을 사용하는 LLM 클라이언트
- * gpt-oss:20b-cloud 모델 지원
+ * Ollama 로컬 모델을 사용하는 LLM 클라이언트 - RestClient 기반
  */
 class OllamaClientImpl(
-    private val ollamaUrl: String,
     private val modelName: String,
-    private val restTemplate: RestTemplate
+    private val ollamaUrl: String,
+    private val restClient: RestClient,
 ) : LlmClient {
 
-    companion object {
-        private const val MAX_CONCURRENT_REQUESTS = 10 // Ollama 동시 요청 제한
+    init {
+        logger().setting("ollamaUrl=$ollamaUrl, modelName=$modelName")
     }
 
-    private val semaphore = Semaphore(MAX_CONCURRENT_REQUESTS)
     private val activeRequests = AtomicInteger(0)
     private val totalRequests = AtomicInteger(0)
     private val completedRequests = AtomicInteger(0)
+    private val mapper = Jackson.getMapper()
 
+    @JsonInclude(Include.NON_NULL)
     data class OllamaRequest(
         val model: String,
-        val messages: List<OllamaMessage>,
-        val temperature: Double = 0.3,
+        val prompt: String,
+        val temperature: Double? = null,
         val stream: Boolean = false
     )
 
-    data class OllamaMessage(
-        val role: String,
-        val content: String
-    )
-
     data class OllamaResponse(
-        val message: OllamaResponseMessage
-    )
-
-    data class OllamaResponseMessage(
-        val role: String,
-        val content: String
+        val model: String,
+        val created_at: String,
+        val response: String,
+        val done: Boolean,
+        val done_reason: String? = null,
+        val context: List<Int>? = null,
+        val total_duration: Long? = null,
+        val load_duration: Long? = null,
+        val prompt_eval_count: Int? = null,
+        val prompt_eval_duration: Long? = null,
+        val eval_count: Int? = null,
+        val eval_duration: Long? = null
     )
 
     override suspend fun createChatCompletion(request: ChatRequest): ChatResponse {
+        return createChatCompletionBlocking(request)
+    }
+
+    fun createChatCompletionBlocking(request: ChatRequest): ChatResponse {
         val requestId = totalRequests.incrementAndGet()
-        val waitingCount = MAX_CONCURRENT_REQUESTS - semaphore.availablePermits
+        activeRequests.incrementAndGet()
 
-        logger().info("🔵 Ollama 요청 #$requestId 대기 중 - [대기: $waitingCount, 활성: ${activeRequests.get()}, 완료: ${completedRequests.get()}]")
-
-        return semaphore.withPermit {
-            val active = activeRequests.incrementAndGet()
-            val available = semaphore.availablePermits
-            val inUse = MAX_CONCURRENT_REQUESTS - available
-
-            logger().info("🟢 Ollama 요청 #$requestId 시작 - [활성: $active/$MAX_CONCURRENT_REQUESTS, 가용: $available, 사용중: $inUse]")
-
-            try {
-                val ollamaRequest = OllamaRequest(
-                    model = modelName,
-                    messages = request.messages.map { msg ->
-                        OllamaMessage(
-                            role = msg.role,
-                            content = msg.content
-                        )
-                    },
-                    temperature = request.temperature
-                )
-
-                val url = "$ollamaUrl/api/chat"
-                val startTime = System.currentTimeMillis()
-
-                val response = restTemplate.postForObject(url, ollamaRequest, OllamaResponse::class.java)
-                    ?: throw IllegalStateException("Ollama returned null response")
-
-                val elapsed = System.currentTimeMillis() - startTime
-                val completed = completedRequests.incrementAndGet()
-                val remaining = totalRequests.get() - completed
-
-                logger().info("✅ Ollama 요청 #$requestId 완료 (${elapsed}ms) - [완료: $completed/${totalRequests.get()}, 남음: $remaining]")
-
-                val choice = Choice(
-                    message = Message(
-                        role = "assistant",
-                        content = response.message.content
-                    ),
-                    finishReason = "stop"
-                )
-
-                ChatResponse(
-                    id = "ollama-$requestId",
-                    choices = listOf(choice),
-                    usage = Usage(
-                        promptTokens = 0,
-                        completionTokens = 0,
-                        totalTokens = 0
-                    )
-                )
-            } catch (e: Exception) {
-                val completed = completedRequests.incrementAndGet()
-                logger().error("❌ Ollama 요청 #$requestId 실패 - [완료: $completed/${totalRequests.get()}] ${e.message}")
-                throw e
-            } finally {
-                val activeAfter = activeRequests.decrementAndGet()
-                val availableAfter = semaphore.availablePermits
-                logger().info("🔴 Ollama 요청 #$requestId 종료 - [활성: $activeAfter/$MAX_CONCURRENT_REQUESTS, 가용: ${availableAfter + 1}]")
+        try {
+            val promptText = request.messages.joinToString("\n") { msg ->
+                msg.content
             }
+
+            val ollamaRequest = OllamaRequest(
+                model = modelName,
+                prompt = promptText,
+                temperature = request.temperature
+            )
+
+            val startTime = System.currentTimeMillis()
+
+            // RestClient로 동기 호출 - Virtual Thread에서 병렬 처리
+            // Ollama는 NDJSON 형식으로 응답하므로 bytes로 받아서 처리
+            val responseBytes = restClient.post()
+                .uri("$ollamaUrl/api/generate")
+                .header("Content-Type", "application/json")
+                .body(ollamaRequest)
+                .retrieve()
+                .body(ByteArray::class.java) ?: throw IllegalStateException("Ollama returned null response")
+
+            val responseText = String(responseBytes)
+
+            // NDJSON 형식: 여러 줄의 JSON이 '\n'으로 구분됨
+            // 모든 줄의 response 필드를 합쳐서 완전한 응답 생성
+            val lines = responseText.trim().lines().filter { it.isNotBlank() }
+            val fullResponse = StringBuilder()
+            var lastResponse: OllamaResponse? = null
+
+            for (line in lines) {
+                try {
+                    val partial = mapper.readValue(line, OllamaResponse::class.java)
+                    fullResponse.append(partial.response)
+                    lastResponse = partial
+                } catch (e: Exception) {
+                    logger().warn("⚠️ Failed to parse Ollama response line: ${line.take(100)}")
+                }
+            }
+
+            if (lastResponse == null || !lastResponse.done) {
+                throw IllegalStateException("Ollama response incomplete - done=${lastResponse?.done}")
+            }
+
+            val elapsed = System.currentTimeMillis() - startTime
+            completedRequests.incrementAndGet()
+
+            logger().info("✅ Ollama 요청 #$requestId 완료 (${elapsed}ms, ${lastResponse.eval_count ?: 0} tokens)")
+
+            val choice = Choice(
+                message = Message(
+                    role = "assistant",
+                    content = fullResponse.toString()
+                ),
+                finishReason = lastResponse.done_reason ?: "stop"
+            )
+
+            return ChatResponse(
+                id = "ollama-$requestId",
+                choices = listOf(choice),
+                usage = Usage(0, 0, 0)
+            )
+
+        } catch (e: Exception) {
+            val completed = completedRequests.incrementAndGet()
+            logger().error("❌ Ollama 요청 #$requestId 실패 - [완료: $completed/${totalRequests.get()}] ${e.message}")
+            throw e
+
+        } finally {
+            val remaining = activeRequests.decrementAndGet()
+            logger().info("🔴 Ollama 요청 #$requestId 종료 (남은 활성: $remaining)")
         }
     }
 }

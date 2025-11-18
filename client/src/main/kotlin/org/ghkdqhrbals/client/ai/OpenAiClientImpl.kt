@@ -46,46 +46,57 @@ class OpenAiClientImpl(
         httpClientConfig = httpClientConfig
     )
 
-    private val currentMaxPermits = AtomicInteger(3)
-    private val semaphore = Semaphore(6)
+    // 변동 상한
+    private val currentMaxPermits = AtomicInteger(5)
+
+    // 고정 상한
+    private val semaphore = Semaphore(10)
 
     override suspend fun createChatCompletion(request: ChatRequest): ChatResponse {
         adjustSemaphoreFromRateLimit()
 
-        return semaphore.withPermit {
-            val remaining = OpenAiHttpConfig.rateLimitRemaining.get()
-            val limit = OpenAiHttpConfig.rateLimitLimit.get()
-            val availablePermits = semaphore.availablePermits
-            val totalPermits = currentMaxPermits.get()
-            val activeRequests = minOf(100 - availablePermits, totalPermits)
+        val remaining = OpenAiHttpConfig.rateLimitRemaining.get()
+        val limit = OpenAiHttpConfig.rateLimitLimit.get()
+        val availablePermits = semaphore.availablePermits
+        val totalPermits = currentMaxPermits.get()
+        val activeRequests = minOf(100 - availablePermits, totalPermits)
 
-            logger().info("OpenAI request START - active: $activeRequests/$totalPermits, available: ${minOf(availablePermits, totalPermits)}, API: $remaining/$limit")
+        logger().info("OpenAI request START - active: $activeRequests/$totalPermits, available: ${minOf(availablePermits, totalPermits)}, API: $remaining/$limit")
 
-            val chatRequest = ChatCompletionRequest(
-                model = ModelId(request.model),
-                messages = request.messages.map {
-                    ChatMessage(role = ChatRole(it.role), content = it.content)
-                },
-                temperature = request.temperature
-            )
+        val chatRequest = ChatCompletionRequest(
+            model = ModelId(request.model),
+            messages = request.messages.map {
+                ChatMessage(role = ChatRole(it.role), content = it.content)
+            },
+            temperature = request.temperature
+        )
 
+        val completion = runBlocking {
             val completion = openai.chatCompletion(chatRequest)
-
-            logger().info("OpenAI request END - available: ${minOf(semaphore.availablePermits, currentMaxPermits.get())}/${currentMaxPermits.get()}")
-
-            ChatResponse(
-                id = completion.id,
-                choices = completion.choices.map { choice ->
-                    Choice(
-                        message = Message(role = choice.message.role.role, content = choice.message.content ?: ""),
-                        finishReason = choice.finishReason?.value
+            logger().info(
+                "OpenAI request END - available: ${
+                    minOf(
+                        semaphore.availablePermits,
+                        currentMaxPermits.get()
                     )
-                },
-                usage = completion.usage?.let { usage ->
-                    Usage(promptTokens = usage.promptTokens, completionTokens = usage.completionTokens, totalTokens = usage.totalTokens)
-                }
+                }/${currentMaxPermits.get()}"
             )
+            completion
         }
+
+        return ChatResponse(
+            id = completion.id,
+            choices = completion.choices.map { choice ->
+                Choice(
+                    message = Message(role = choice.message.role.role, content = choice.message.content ?: ""),
+                    finishReason = choice.finishReason?.value
+                )
+            },
+            usage = completion.usage?.let { usage ->
+                Usage(promptTokens = usage.promptTokens, completionTokens = usage.completionTokens, totalTokens = usage.totalTokens)
+            }
+        )
+
     }
 
     private fun parseResetTime(resetStr: String): Long {

@@ -11,7 +11,7 @@ class NoopLlmClient : LlmClient {
         )
     }
 
-    override fun summarizePaper(abstract: String, maxLength: Int, journalRef: String?): PaperAnalysisResponse {
+    override suspend fun summarizePaper(abstract: String, maxLength: Int, journalRef: String?): PaperAnalysisResponse {
         // OpenAI가 비활성화된 경우 요약은 빈 문자열 반환
         return PaperAnalysisResponse()
     }
