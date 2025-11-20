@@ -2,6 +2,8 @@ package org.ghkdqhrbals.oauth.service
 
 import org.ghkdqhrbals.oauth.oauth.OauthProviderRegistry
 import org.apache.coyote.BadRequestException
+import org.springframework.beans.factory.annotation.Qualifier
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.http.MediaType
 import org.springframework.stereotype.Service
 import org.springframework.util.LinkedMultiValueMap
@@ -12,8 +14,9 @@ import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 
 @Service
+@ConditionalOnProperty(prefix = "oauth", name = ["enable-providers"], havingValue = "true", matchIfMissing = false)
 internal class KakaoOauthService(
-    private val client: RestClient,
+    @Qualifier("restClient") private val client: RestClient,
     registry: OauthProviderRegistry,
 ): OAuthService(
     provider = OauthProviderKind.KAKAO,

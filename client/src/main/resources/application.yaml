@@ -1,6 +1,29 @@
 spring:
+  batch:
+    jdbc:
+      initialize-schema: always  # 부트가 기동하면서 BATCH_* 테이블 자동 생성
+    job:
+      enabled: false             # 애플리케이션 기동 시 자동 Job 실행 막기
+  jackson:
+    time-zone: UTC
   application:
     name: client
+  quartz:
+    job-store-type: memory
+    auto-startup: true
+  thymeleaf:
+    enabled: true
+    cache: false
+    prefix: classpath:/templates/
+    suffix: .html
+    mode: HTML
+
+  web:
+    resources:
+      static-locations: classpath:/static/
+      cache:
+        period: 0
+
   output:
     ansi:
       enabled: ALWAYS
@@ -22,10 +45,11 @@ spring:
     url: jdbc:mysql://database-1.chmscg6ww41e.ap-northeast-2.rds.amazonaws.com:3306/paper?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul
   jpa:
     hibernate:
-      ddl-auto: none
+      ddl-auto: create
     show-sql: false
     properties:
       hibernate:
+        jdbc.time_zone: UTC
         format_sql: true
         dialect: org.hibernate.dialect.MySQLDialect
 
@@ -75,3 +99,25 @@ redis:
     consumer:
       name: paper-summary-consumer-1
       threads: 50
+
+# 홈 진입시 로그인 페이지로 유도하고 싶다면 아래를 사용하세요.
+# server:
+#   servlet:
+#     context-path: /
+
+# SpringDoc/Swagger 설정
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true
+    path: /swagger-ui.html
+  default-produces-media-type: application/json
+  default-consumes-media-type: application/json
+  model-and-view-allowed: true
+
+oauth:
+  enable-providers: true
+  providers:
+    kakao:
+      scopes: profile_nickname, account_email

@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title>프로필 - NotiPaper</title>
+</head>
+
+<body>
+
+<div layout:fragment="content">
+
+    <h1 class="text-3xl font-bold mb-2">내 프로필</h1>
+    <p class="text-gray-600 mb-8">사용자 정보 및 구독 현황을 확인하세요</p>
+
+    <!-- Error Message -->
+    <div th:if="${error}" class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-6">
+        <p th:text="${error}"></p>
+    </div>
+
+    <!-- User Info Card -->
+    <div th:if="${user}" class="bg-white p-8 rounded-xl border shadow-sm mb-8">
+        <div class="flex items-start justify-between">
+            <div class="flex items-center space-x-6">
+                <div class="w-20 h-20 rounded-full bg-blue-500 text-white flex items-center justify-center text-3xl">
+                    👤
+                </div>
+                <div>
+                    <h2 class="text-2xl font-semibold" th:text="${user.name}">사용자 이름</h2>
+                    <p class="text-gray-600 mt-1" th:text="${user.email}">user@example.com</p>
+                    <div class="mt-2 flex items-center space-x-4 text-sm text-gray-500">
+                        <span th:text="'나이: ' + ${user.age} + '세'">나이: 25세</span>
+                        <span>•</span>
+                        <span th:text="'성별: ' + ${user.gender}">성별: MALE</span>
+                        <span>•</span>
+                        <span th:text="'상태: ' + ${user.status}">상태: ACTIVE</span>
+                    </div>
+                </div>
+            </div>
+            <a th:href="@{/settings}" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">
+                프로필 수정
+            </a>
+        </div>
+
+        <!-- Additional Info -->
+        <div class="mt-6 pt-6 border-t grid grid-cols-2 gap-4">
+            <div>
+                <p class="text-sm text-gray-500">전화번호</p>
+                <p class="font-medium" th:text="${user.phoneNumber}">010-1234-5678</p>
+            </div>
+            <div>
+                <p class="text-sm text-gray-500">가입일</p>
+                <p class="font-medium" th:text="${#temporals.format(user.createdAt, 'yyyy-MM-dd')}">2024-01-01</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Subscriptions Section -->
+    <div class="bg-white p-8 rounded-xl border shadow-sm">
+        <div class="flex items-center justify-between mb-6">
+            <h2 class="text-xl font-semibold">내 구독 목록</h2>
+            <a th:href="@{/subscriptions}" class="text-blue-600 text-sm hover:underline">구독 관리하기 →</a>
+        </div>
+
+        <!-- Subscription List -->
+        <div th:if="${subscriptions != null and !subscriptions.isEmpty()}">
+            <div class="space-y-4">
+                <div th:each="subscription : ${subscriptions}"
+                     class="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50">
+                    <div class="flex-1">
+                        <h3 class="font-semibold" th:text="${subscription.subscribe.name}">구독 주제</h3>
+                        <p class="text-sm text-gray-600" th:text="${subscription.subscribe.description}">주제 설명</p>
+                        <div class="mt-2 flex items-center space-x-3">
+                            <span class="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded"
+                                  th:text="${subscription.subscribe.subscribeType}">KEYWORD</span>
+                            <span class="text-xs text-gray-500">
+                                우선순위: <span th:text="${subscription.priority}">3</span>
+                            </span>
+                            <span class="text-xs text-gray-500">
+                                구독일: <span th:text="${#temporals.format(subscription.subscribedAt, 'yyyy-MM-dd')}">2024-01-01</span>
+                            </span>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <span th:if="${subscription.notificationEnabled}"
+                              class="text-green-500 text-sm">🔔 알림 켜짐</span>
+                        <span th:unless="${subscription.notificationEnabled}"
+                              class="text-gray-400 text-sm">🔕 알림 꺼짐</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Empty State -->
+        <div th:if="${subscriptions == null or subscriptions.isEmpty()}"
+             class="text-center py-12">
+            <div class="text-6xl mb-4">📬</div>
+            <p class="text-gray-600 mb-4">아직 구독중인 주제가 없습니다</p>
+            <a th:href="@{/subscriptions}"
+               class="inline-block px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">
+                구독 추가하기
+            </a>
+        </div>
+    </div>
+
+</div>
+
+</body>
+</html>
+

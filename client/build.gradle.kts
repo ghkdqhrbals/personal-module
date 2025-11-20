@@ -72,7 +72,12 @@ repositories {
 
 dependencies {
     // thymeleaf
-    runtimeOnly("org.springframework.boot:spring-boot-starter-thymeleaf")
+    implementation("org.springframework.batch:spring-batch-infrastructure")
+    implementation("org.springframework.batch:spring-batch-core")
+
+    implementation("org.springframework.boot:spring-boot-starter-quartz")
+    implementation("org.springframework.boot:spring-boot-starter-thymeleaf")
+    implementation("nz.net.ultraq.thymeleaf:thymeleaf-layout-dialect:3.3.0")
     kapt("org.springframework.boot:spring-boot-configuration-processor")
     implementation("org.springframework.boot:spring-boot-starter")
     implementation("org.springframework.boot:spring-boot-starter-web")
@@ -95,7 +100,7 @@ dependencies {
     implementation("io.ktor:ktor-client-logging:3.0.0")
     implementation("io.ktor:ktor-serialization-kotlinx-json:3.0.0")
     // Swagger UI (springdoc-openapi)
-    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.6.0")
+    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.7.0")
     // Atom/Feed parser for arXiv
     implementation("com.rometools:rome:2.1.0")
     // HTML sanitize
@@ -105,6 +110,14 @@ dependencies {
     // Apache HttpClient for RestClient connection pooling (version managed by Spring Boot BOM)
     implementation("org.apache.httpcomponents.client5:httpclient5")
     implementation("org.apache.httpcomponents.core5:httpcore5")
+    // oauth 모듈: 좌표로 선언하고 composite build 포함 시 로컬 빌드로 대체
+    implementation("org.ghkdqhrbals:oauth:0.0.1")
+    // test db
+    testImplementation("com.h2database:h2")
+    // testcontainers
+    testImplementation("org.testcontainers:testcontainers:1.19.3")
+    testImplementation("org.testcontainers:junit-jupiter:1.19.3")
+    testImplementation("com.redis.testcontainers:testcontainers-redis-junit:1.6.4")
 }
 
 kotlin {

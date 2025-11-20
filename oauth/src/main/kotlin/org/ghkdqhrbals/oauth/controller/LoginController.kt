@@ -5,11 +5,13 @@ import jakarta.servlet.http.HttpServletResponse
 import org.ghkdqhrbals.oauth.service.*
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 
 @ConditionalOnClass(LoginControllerModuleMarker::class)
 @RestController
+@RequestMapping("/oauth")
 class LoginController(private val oAuthClientFactory: OAuthClientFactory) {
     @GetMapping("/login/google")
     fun googleLogin(response: HttpServletResponse) = response.sendRedirect(oAuthClientFactory.get(OauthProviderKind.GOOGLE).buildAuthorizationUrl())
@@ -18,7 +20,7 @@ class LoginController(private val oAuthClientFactory: OAuthClientFactory) {
     @GetMapping("/userinfo/google")
     fun googleUserInfo(@RequestParam accessToken: String) = oAuthClientFactory.get(OauthProviderKind.GOOGLE).fetchUserInfo(accessToken)
 
-    @GetMapping("/login/oauth2/code/google")
+    @GetMapping("/login/code/google")
     fun googleCallback(
         @RequestParam(required = false) code: String?,
         @RequestParam(required = false) error: String?,
@@ -42,7 +44,7 @@ class LoginController(private val oAuthClientFactory: OAuthClientFactory) {
     @GetMapping("/userinfo/naver")
     fun naverUserInfo(@RequestParam accessToken: String) = oAuthClientFactory.get(OauthProviderKind.NAVER).fetchUserInfo(accessToken)
 
-    @GetMapping("/login/oauth2/code/kakao")
+    @GetMapping("/login/code/kakao")
     fun kakaoCallback(
         @RequestParam(required = false) code: String?,
         @RequestParam(required = false) error: String?,
@@ -52,7 +54,7 @@ class LoginController(private val oAuthClientFactory: OAuthClientFactory) {
         return oAuthClientFactory.get(OauthProviderKind.KAKAO).exchangeToken(code ?: "") ?: throw IllegalStateException("Failed to get access token")
     }
 
-    @GetMapping("/login/oauth2/code/naver")
+    @GetMapping("/login/code/naver")
     fun naverCallback(
         @RequestParam(required = false) code: String?,
         @RequestParam(required = false) error: String?,

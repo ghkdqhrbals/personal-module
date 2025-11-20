@@ -1,7 +1,8 @@
 package org.ghkdqhrbals.client.ai
 
-import org.ghkdqhrbals.client.config.logger
-import org.ghkdqhrbals.client.paper.dto.PaperAnalysisResponse
+import org.ghkdqhrbals.client.config.Jackson
+import org.ghkdqhrbals.client.config.log.logger
+import org.ghkdqhrbals.client.domain.paper.dto.PaperAnalysisResponse
 
 interface LlmClient {
     suspend fun createChatCompletion(request: ChatRequest): ChatResponse
@@ -75,26 +76,64 @@ interface LlmClient {
 
         val response = createChatCompletion(request)
         val raw = response.choices.firstOrNull()?.message?.content
+            ?: throw IllegalStateException("No response from LLM")
 
-        // LLM이 JSON을 코드블록으로 감싸는 경우를 처리
-        val cleanedJson = raw?.let { content ->
-            content.trim()
-                .removePrefix("```json")
-                .removePrefix("```")
-                .removeSuffix("```")
-                .trim()
+        val codeBlockRegex = Regex("```[a-zA-Z]*")
+        fun removeCodeBlocks(input: String): String =
+            input.replace(codeBlockRegex, "").trim()
+        fun ensureJsonClosed(json: String): String {
+            val open = json.count { it == '{' }
+            val close = json.count { it == '}' }
+            return if (open > close) json + "}".repeat(open - close) else json
         }
+        fun removeControlChars(s: String): String =
+            s.replace(Regex("[\\u0000-\\u001F]"), "")
+        fun normalizeQuotes(s: String): String =
+            s.replace("“", "\"")
+                .replace("”", "\"")
+                .replace("‘", "'")
+                .replace("’", "'")
+        try {
+            // LLM이 JSON을 코드블록으로 감싸는 경우를 처리하고 제어 문자 제거
+            var cleanedJson = raw.trim()
 
-        val mapper = com.fasterxml.jackson.databind.ObjectMapper()
-        val node = mapper.readTree(cleanedJson)
-        val core = node["core_contribution"]?.asText()?.trim() ?: ""
-        val novelty = node["novelty_against_previous_works"]?.asText()?.trim() ?: ""
-        val journal = node["journal_name"]?.asText()?.takeIf { it != "null" }
-        val year = node["year"]?.asInt()
-        val ifv = node["impact_factor"]?.asDouble()
-        val ifYear = node["impact_factor_year"]?.asInt()
+            // 1. 코드블록 제거
+            cleanedJson = removeCodeBlocks(cleanedJson)
+            // 2. 개행 제거
+            cleanedJson = cleanedJson.replace("\r\n", "")
+                .replace("\n", "")
+                .replace("\r", "")
+            // 3. 제어문자 제거
+            cleanedJson = removeControlChars(cleanedJson)
+            // 4. 잘린 JSON 자동 복구
+            cleanedJson = ensureJsonClosed(cleanedJson)
+            // 5. 따옴표 정규화
+            cleanedJson = normalizeQuotes(cleanedJson)
 
-        if (core.isNotBlank() || novelty.isNotBlank() || journal != null || ifv != null) {
+            logger().debug("Cleaned JSON length: ${cleanedJson.length} chars")
+
+            Jackson.getMapper()
+            val mapper = com.fasterxml.jackson.databind.ObjectMapper()
+            val node = try {
+                mapper.readTree(cleanedJson)
+            } catch (e: com.fasterxml.jackson.core.JsonParseException) {
+                logger().error("JSON Parse Error. Raw response (first 500 chars): ${raw.take(500)}")
+                logger().error("Cleaned JSON (first 500 chars): ${cleanedJson.take(500)}")
+                throw IllegalStateException("Failed to parse LLM JSON response: ${e.message}", e)
+            }
+
+            val core = node["core_contribution"]?.asText()?.trim() ?: ""
+            val novelty = node["novelty_against_previous_works"]?.asText()?.trim() ?: ""
+            val journal = node["journal_name"]?.asText()?.takeIf { it != "null" && it.isNotBlank() }
+            val year = node["year"]?.asInt()
+            val ifv = node["impact_factor"]?.asDouble()
+            val ifYear = node["impact_factor_year"]?.asInt()
+
+            if (core.isBlank() && novelty.isBlank()) {
+                logger().warn("LLM returned empty core_contribution and novelty. Response: $raw")
+                throw IllegalStateException("LLM returned empty summary fields")
+            }
+
             val result = PaperAnalysisResponse(
                 coreContribution = core,
                 noveltyAgainstPreviousWorks = novelty,
@@ -103,10 +142,13 @@ interface LlmClient {
                 impactFactor = ifv,
                 impactFactorYear = ifYear
             )
-            logger().info("Summarized  $result")
+            logger().info("✅ Summarized successfully - core: ${core.take(50)}..., novelty: ${novelty.take(50)}...")
             return result
-        } else {
-            throw IllegalStateException("Failed to summarize paper abstract. Response: $raw")
+
+        } catch (e: Exception) {
+            logger().error("❌ Failed to process LLM response", e)
+            logger().error("Raw response (first 1000 chars): ${raw.take(1000)}")
+            throw e
         }
     }
 }

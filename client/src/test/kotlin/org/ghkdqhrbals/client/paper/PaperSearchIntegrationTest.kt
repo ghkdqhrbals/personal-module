@@ -1,13 +1,17 @@
 package org.ghkdqhrbals.client.paper
 
+import org.ghkdqhrbals.client.domain.paper.dto.PaperSearchRequest
+import org.ghkdqhrbals.client.domain.paper.dto.PaperSearchResponse
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.test.web.client.TestRestTemplate
 import org.springframework.http.HttpStatus
 import org.junit.jupiter.api.Assertions.*
+import org.springframework.test.context.ActiveProfiles
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@ActiveProfiles("test")
 class PaperSearchIntegrationTest {
 
     @Autowired
@@ -54,4 +58,3 @@ class PaperSearchIntegrationTest {
         assertNotNull(response.body)
     }
 }
-

@@ -1,6 +1,6 @@
 package org.ghkdqhrbals.client.ai
 
-import org.ghkdqhrbals.client.paper.dto.PaperAnalysisResponse
+import org.ghkdqhrbals.client.domain.paper.dto.PaperAnalysisResponse
 
 class NoopLlmClient : LlmClient {
     override suspend fun createChatCompletion(request: ChatRequest): ChatResponse {

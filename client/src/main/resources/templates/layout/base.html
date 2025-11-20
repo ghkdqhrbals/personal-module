@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <title th:text="${title} ?: 'NotiPaper'">NotiPaper</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Tailwind Custom Config -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        npblue: '#3B82F6'
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="stylesheet" th:href="@{/css/notipaper.css}">
+</head>
+
+<body class="bg-gray-50 text-gray-900">
+
+<!-- NAVBAR -->
+<nav class="bg-white border-b border-gray-200">
+    <div class="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+
+        <div class="text-xl font-semibold">
+            <a th:href="@{/}" class="flex items-center space-x-2">
+                <span>📄</span>
+                <span>NotiPaper</span>
+            </a>
+        </div>
+
+        <div class="flex items-center space-x-8">
+            <div class="flex space-x-8 text-sm font-medium">
+                <a th:href="@{/dashboard}" class="hover:text-blue-600">Dashboard</a>
+                <a th:href="@{/recommendations}" class="hover:text-blue-600">AI 추천</a>
+                <a th:href="@{/papers}" class="hover:text-blue-600">My Papers</a>
+                <a th:href="@{/search}" class="hover:text-blue-600">Search</a>
+                <a th:href="@{/subscriptions}" class="hover:text-blue-600">구독 관리</a>
+                <a th:href="@{/settings}" class="hover:text-blue-600">Settings</a>
+            </div>
+
+            <!-- User Profile Section -->
+            <div class="relative group pb-2 np-profile-menu">
+                <button class="flex items-center space-x-2 text-sm hover:text-blue-600" type="button">
+                    <div class="w-8 h-8 rounded-full bg-blue-500 text-white flex items-center justify-center">
+                        👤
+                    </div>
+                    <span class="hidden md:block">내 정보</span>
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                    </svg>
+                </button>
+
+                <!-- Dropdown Menu -->
+                <div class="np-dropdown absolute right-0 top-full mt-0 z-50 w-48 bg-white rounded-lg shadow-lg border border-gray-200 hidden group-hover:block">
+                    <div class="py-2">
+                        <a th:href="@{/profile}" class="block px-4 py-2 text-sm hover:bg-gray-100">
+                            👤 프로필
+                        </a>
+                        <a th:href="@{/subscriptions}" class="block px-4 py-2 text-sm hover:bg-gray-100">
+                            📬 구독 관리
+                        </a>
+                        <a th:href="@{/settings}" class="block px-4 py-2 text-sm hover:bg-gray-100">
+                            ⚙️ 설정
+                        </a>
+                        <hr class="my-2">
+                        <a th:href="@{/logout}" class="block px-4 py-2 text-sm text-red-600 hover:bg-gray-100">
+                            🚪 로그아웃
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</nav>
+
+<!-- MAIN CONTENT -->
+<div class="max-w-6xl mx-auto px-6 py-10">
+    <div layout:fragment="content">
+        <!-- Child pages render here -->
+    </div>
+</div>
+
+<!-- Scroll position persist (per-path) -->
+<script>
+  (function () {
+    try {
+      if ('scrollRestoration' in history) {
+        history.scrollRestoration = 'manual';
+      }
+      const key = 'np-scroll-pos:' + location.pathname;
+
+      const save = function () {
+        try {
+          sessionStorage.setItem(key, String(window.scrollY || window.pageYOffset || 0));
+        } catch (e) { /* ignore */ }
+      };
+
+      const restore = function () {
+        try {
+          if (location.hash) return; // anchor 우선
+          const v = sessionStorage.getItem(key);
+          if (v !== null) {
+            const y = parseInt(v, 10);
+            if (!Number.isNaN(y)) {
+              window.scrollTo(0, y);
+            }
+          }
+        } catch (e) { /* ignore */ }
+      };
+
+      // 초기 복원: DOM 준비 직후 + load 직후 + 약간의 지연 후 재시도
+      document.addEventListener('DOMContentLoaded', function () {
+        restore();
+      });
+      window.addEventListener('load', function () {
+        restore();
+        setTimeout(restore, 100); // 지연 로딩 요소 대비
+        setTimeout(restore, 300); // 추가 한 번 더
+      });
+
+      // 뒤로가기(bfcache) 포함 복원
+      window.addEventListener('pageshow', function (ev) {
+        // ev.persisted가 true면 bfcache에서 복귀
+        restore();
+      });
+
+      // 스크롤 중 주기적으로 저장 (RAF 쓰로틀)
+      let ticking = false;
+      window.addEventListener('scroll', function () {
+        if (!ticking) {
+          ticking = true;
+          requestAnimationFrame(function () {
+            save();
+            ticking = false;
+          });
+        }
+      }, { passive: true });
+
+      // 페이지 떠나기 전/숨김 시 저장
+      document.addEventListener('visibilitychange', function () {
+        if (document.hidden) save();
+      });
+      window.addEventListener('beforeunload', save);
+      window.addEventListener('pagehide', save);
+
+    } catch (e) { /* ignore */ }
+  })();
+</script>
+
+<!-- Stable hover/click dropdown control for profile menu -->
+<script>
+  (function(){
+    const container = document.querySelector('.np-profile-menu');
+    if (!container) return;
+    const btn = container.querySelector('button');
+    const menu = container.querySelector('.np-dropdown');
+    if (!btn || !menu) return;
+
+    let hideTimer = null;
+    const show = () => {
+      if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+      menu.classList.remove('hidden');
+    };
+    const hide = (delay = 120) => {
+      if (hideTimer) clearTimeout(hideTimer);
+      hideTimer = setTimeout(() => {
+        menu.classList.add('hidden');
+      }, delay);
+    };
+
+    // Keep open while hovering button or menu
+    container.addEventListener('mouseenter', show);
+    container.addEventListener('mouseleave', () => hide(120));
+
+    // Click toggle (for touch devices as well)
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (menu.classList.contains('hidden')) show(); else hide(0);
+    });
+
+    // Close on outside click or ESC
+    document.addEventListener('click', (e) => {
+      if (!container.contains(e.target)) hide(0);
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') hide(0);
+    });
+  })();
+</script>
+
+</body>
+</html>

@@ -1,6 +1,8 @@
 package org.ghkdqhrbals.oauth.config
 
 import org.ghkdqhrbals.oauth.config.log
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.http.client.BufferingClientHttpRequestFactory
@@ -11,10 +13,12 @@ import org.springframework.web.client.RestClient
 import java.io.ByteArrayInputStream
 import java.io.InputStream
 
-@Configuration
+@Configuration("oauthRestClientConfiguration")
+@ConditionalOnProperty(prefix = "oauth", name = ["enable-internal-rest-client"], havingValue = "true", matchIfMissing = false)
 class RestClientConfiguration {
 
     @Bean
+    @ConditionalOnMissingBean(RestClient::class)
     fun restClient(): RestClient {
         val base = SimpleClientHttpRequestFactory().apply {
             setConnectTimeout(2_000)
