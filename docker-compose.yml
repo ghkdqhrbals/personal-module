@@ -1,27 +1,28 @@
 # 로컬서버 셋업
 services:
-  ollama:
-    image: ollama/ollama:latest
-    container_name: ollama
-    restart: unless-stopped
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-      - ./entrypoint.sh:/entrypoint.sh
-    environment:
-      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma3}
-      - OLLAMA_NUM_PARALLEL=16
-      - OLLAMA_MAX_LOADED_MODELS=4
-      - OLLAMA_MAX_QUEUE=16
-      - OLLAMA_KEEP_ALIVE=5m
-    entrypoint: ["/bin/bash", "/entrypoint.sh"]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 90s
+  # ollama docker 에선 mpu 메탈가속 지원이 안되어 주석처리함ㅜ
+#  ollama:
+#    image: ollama/ollama:latest
+#    container_name: ollama
+#    restart: unless-stopped
+#    ports:
+#      - "11434:11434"
+#    volumes:
+#      - ollama_data:/root/.ollama
+#      - ./run.sh:/run.sh
+#    environment:
+#      - OLLAMA_MODEL=${OLLAMA_MODEL:-gemma3}
+#      - OLLAMA_NUM_PARALLEL=16
+#      - OLLAMA_MAX_LOADED_MODELS=4
+#      - OLLAMA_MAX_QUEUE=16
+#      - OLLAMA_KEEP_ALIVE=5m
+#    entrypoint: ["/bin/bash", "/run.sh"]
+#    healthcheck:
+#      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+#      interval: 30s
+#      timeout: 10s
+#      retries: 3
+#      start_period: 90s
 
   redis:
     image: redis:7-alpine

@@ -3,6 +3,11 @@
 set -e
 
 echo "=========================================="
+echo "Starting Docker containers using docker-compose..."
+echo "=========================================="
+docker compose -f docker-compose.yml up -d
+
+echo "=========================================="
 echo "Starting Ollama server with parallel processing enabled..."
 echo "OLLAMA_NUM_PARALLEL: ${OLLAMA_NUM_PARALLEL:-default}"
 echo "OLLAMA_MAX_LOADED_MODELS: ${OLLAMA_MAX_LOADED_MODELS:-default}"
@@ -47,4 +52,3 @@ echo "Server running at http://localhost:11434"
 
 # 백그라운드 프로세스 유지
 wait
-

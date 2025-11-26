@@ -42,7 +42,9 @@ spring:
         fail-fast: false
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://localhost:3306/paper?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul
+    url: jdbc:mysql://localhost:3306/main
+    hikari:
+      username: root
   jpa:
     hibernate:
       ddl-auto: create
