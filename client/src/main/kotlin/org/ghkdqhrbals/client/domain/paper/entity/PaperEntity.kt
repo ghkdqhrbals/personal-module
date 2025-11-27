@@ -43,6 +43,6 @@ data class PaperEntity(
     @Column(name = "summary", columnDefinition = "TEXT")
     val summary: String? = null,
 
-    val  novelty: String? = null
+    val novelty: String? = null
 )
 

@@ -6,7 +6,7 @@ import com.rometools.rome.io.SyndFeedInput
 import com.rometools.rome.io.XmlReader
 import org.ghkdqhrbals.client.config.log.logger
 import org.ghkdqhrbals.client.domain.event.SummaryEvent
-import org.ghkdqhrbals.client.domain.paper.dto.Paper
+import org.ghkdqhrbals.client.controller.paper.dto.Paper
 import org.ghkdqhrbals.client.domain.paper.entity.PaperEntity
 import org.jdom2.Element
 import org.jsoup.Jsoup

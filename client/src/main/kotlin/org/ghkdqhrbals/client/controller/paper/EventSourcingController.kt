@@ -1,5 +1,7 @@
-package org.ghkdqhrbals.client.domain.event
+package org.ghkdqhrbals.client.controller.paper
 
+import org.ghkdqhrbals.client.domain.event.EventService
+import org.ghkdqhrbals.client.domain.event.EventStoreEntity
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 import java.time.Instant

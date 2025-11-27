@@ -1,4 +1,4 @@
-package org.ghkdqhrbals.client.domain.paper.api
+package org.ghkdqhrbals.client.controller.paper
 
 import org.ghkdqhrbals.client.domain.paper.entity.PaperSubscribe
 import org.ghkdqhrbals.client.domain.paper.service.PaperRecommendationService

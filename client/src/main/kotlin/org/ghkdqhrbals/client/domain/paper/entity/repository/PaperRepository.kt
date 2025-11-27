@@ -1,4 +1,4 @@
-package org.ghkdqhrbals.client.domain.paper.repository
+package org.ghkdqhrbals.client.domain.paper.entity.repository
 
 import org.ghkdqhrbals.client.domain.paper.entity.PaperEntity
 import org.springframework.data.jpa.repository.JpaRepository

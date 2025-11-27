@@ -1,4 +1,4 @@
-package org.ghkdqhrbals.client.controller
+package org.ghkdqhrbals.client.controller.user
 
 import jakarta.servlet.http.HttpServletResponse
 import org.ghkdqhrbals.client.domain.user.service.OAuthService

@@ -46,7 +46,7 @@ sealed class PaperEvent(
  * - 진행 상태 추적
  */
 data class PaperSearchAndStoreEvent(
-    val searchEventId: String,  // 전체 검색 작업의 ID (유저에게 반환되는 ID)
+    val searchEventId: String = "",  // 전체 검색 작업의 ID (유저에게 반환되는 ID)
     val query: String?,
     val categories: List<String>?,
     val maxResults: Int = 10,

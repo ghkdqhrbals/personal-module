@@ -3,7 +3,7 @@ spring:
     jdbc:
       initialize-schema: always  # 부트가 기동하면서 BATCH_* 테이블 자동 생성
     job:
-      enabled: false             # 애플리케이션 기동 시 자동 Job 실행 막기
+      enabled: true             # 애플리케이션 기동 시 자동 Job 실행 막기
   jackson:
     time-zone: UTC
   application:
@@ -47,7 +47,7 @@ spring:
       username: root
   jpa:
     hibernate:
-      ddl-auto: create
+      ddl-auto: none
     show-sql: false
     properties:
       hibernate:

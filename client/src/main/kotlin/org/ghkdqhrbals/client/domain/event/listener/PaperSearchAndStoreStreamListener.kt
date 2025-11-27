@@ -1,11 +1,16 @@
-package org.ghkdqhrbals.client.domain.event
+package org.ghkdqhrbals.client.domain.event.listener
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import jakarta.annotation.PostConstruct
 import jakarta.annotation.PreDestroy
 import org.ghkdqhrbals.client.config.Jackson
+import org.ghkdqhrbals.client.config.log.LogTitle
 import org.ghkdqhrbals.client.config.log.logger
+import org.ghkdqhrbals.client.config.log.title
+import org.ghkdqhrbals.client.domain.event.EventPublisher
+import org.ghkdqhrbals.client.domain.event.PaperSearchAndStoreEvent
+import org.ghkdqhrbals.client.domain.event.SummaryEvent
 import org.ghkdqhrbals.client.domain.paper.service.ArxivHttpClient
 import org.ghkdqhrbals.client.domain.paper.service.ArxivPaper
 import org.ghkdqhrbals.client.domain.paper.service.ArxivXmlParser
@@ -38,7 +43,7 @@ class PaperSearchAndStoreStreamListener(
     private val eventPublisher: EventPublisher,
     @Value("\${redis.stream.events.paper-search-and-store:domain:events:paper-search-and-store}") private val streamKey: String,
     @Value("\${redis.stream.events.group:event-handlers}") private val groupName: String
-) : StreamListener<String, MapRecord<String, String, String>> {
+) : GracefulConsumer() {
 
     private val mapper: ObjectMapper = Jackson.getMapper()
     private lateinit var container: StreamMessageListenerContainer<String, MapRecord<String, String, String>>
@@ -48,15 +53,23 @@ class PaperSearchAndStoreStreamListener(
         private const val DEFAULT_QUERY = "all:machine+all:learning"
     }
 
-    @PostConstruct
-    fun start() {
+    override fun start() {
         initializeConsumerGroup()
+
+        val options = StreamMessageListenerContainer.StreamMessageListenerContainerOptions.builder()
+            .pollTimeout(Duration.ofMillis(100))
+            .errorHandler { ex ->
+                if (shuttingDown) {
+                    return@errorHandler
+                }
+
+                logger().error("[PaperSearchAndStoreStreamListener] Unexpected error", ex)
+            }
+            .build()
 
         container = StreamMessageListenerContainer.create(
             redisTemplate.connectionFactory!!,
-            StreamMessageListenerContainer.StreamMessageListenerContainerOptions.builder()
-                .pollTimeout(Duration.ofMillis(100))
-                .build()
+            options
         )
 
         container.receive(
@@ -67,6 +80,17 @@ class PaperSearchAndStoreStreamListener(
 
         container.start()
         logger().info("[PaperSearchAndStoreListener] Started listening on stream=$streamKey")
+        if (!running) {
+            running = true
+        }
+    }
+
+    override fun stop() {
+        logger().title(LogTitle.STREAM, "PaperSearchAndStoreEvent 리스너 종료 시작")
+        shuttingDown = true
+        container.stop()
+        running = false
+        logger().title(LogTitle.STREAM, "PaperSearchAndStoreEvent 리스너 종료 완료")
     }
 
     private fun initializeConsumerGroup() {
@@ -237,8 +261,13 @@ class PaperSearchAndStoreStreamListener(
 
     @PreDestroy
     fun shutdown() {
-        container.stop()
+        shuttingDown = true
+        runCatching {
+            logger().info("[PaperSearchAndStoreListener] Shutting down container...")
+            container.stop()
+            logger().info("[PaperSearchAndStoreListener] Stopping container...")
+        }
+            .onFailure { ex -> logger().info("[PaperSearchAndStoreListener] Error while stopping container (ignored): ${ex.message}") }
         logger().info("[PaperSearchAndStoreListener] Stopped")
     }
 }
-

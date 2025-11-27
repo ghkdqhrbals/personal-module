@@ -1,7 +1,7 @@
 package org.ghkdqhrbals.client.paper
 
-import org.ghkdqhrbals.client.domain.paper.dto.PaperSearchRequest
-import org.ghkdqhrbals.client.domain.paper.dto.PaperSearchResponse
+import org.ghkdqhrbals.client.controller.paper.dto.PaperSearchRequest
+import org.ghkdqhrbals.client.controller.paper.dto.PaperSearchResponse
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest

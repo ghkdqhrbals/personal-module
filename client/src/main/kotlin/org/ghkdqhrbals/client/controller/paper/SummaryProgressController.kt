@@ -1,4 +1,4 @@
-package org.ghkdqhrbals.client.domain.paper.queue
+package org.ghkdqhrbals.client.controller.paper
 
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable

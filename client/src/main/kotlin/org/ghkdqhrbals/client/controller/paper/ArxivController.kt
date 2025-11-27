@@ -1,10 +1,10 @@
-package org.ghkdqhrbals.client.domain.paper.controller
+package org.ghkdqhrbals.client.controller.paper
 
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.tags.Tag
 import org.ghkdqhrbals.client.config.log.logger
 import org.ghkdqhrbals.client.domain.paper.service.ArxivService
-import org.ghkdqhrbals.client.domain.paper.dto.ArxivSearchStatusResponse
+import org.ghkdqhrbals.client.controller.paper.dto.ArxivSearchStatusResponse
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 

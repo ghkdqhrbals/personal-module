@@ -1,4 +1,4 @@
-package org.ghkdqhrbals.client.domain.paper.dto
+package org.ghkdqhrbals.client.controller.paper.dto
 
 import com.fasterxml.jackson.annotation.JsonInclude
 

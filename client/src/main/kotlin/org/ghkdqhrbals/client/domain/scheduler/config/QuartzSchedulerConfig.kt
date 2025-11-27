@@ -1,8 +1,7 @@
 package org.ghkdqhrbals.client.domain.scheduler.config
 
 
-import org.ghkdqhrbals.client.domain.scheduler.job.SubscribeBatchQuartzJob
-
+import org.ghkdqhrbals.client.domain.scheduler.job.SubscribeBatchQuartzJobs
 import org.quartz.*
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -19,7 +18,7 @@ class QuartzSchedulerConfig {
      */
     @Bean
     fun subscribeBatchJobDetail(): JobDetail =
-        JobBuilder.newJob(SubscribeBatchQuartzJob::class.java)
+        JobBuilder.newJob(SubscribeBatchQuartzJobs::class.java)
             .withIdentity("subscribeBatchJob", "batch-jobs")
             .storeDurably()
             .build()
@@ -35,7 +34,8 @@ class QuartzSchedulerConfig {
             .startNow()
             .withSchedule(
                 SimpleScheduleBuilder.simpleSchedule()
-                    .withIntervalInMinutes(10)
+                    .withIntervalInMinutes(1)
+//                    .withIntervalInSeconds(1)
                     .repeatForever()
             )
             .build()

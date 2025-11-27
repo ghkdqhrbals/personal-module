@@ -5,7 +5,7 @@ import org.ghkdqhrbals.client.ai.LlmClient
 import org.ghkdqhrbals.client.common.LockTimeoutException
 import org.ghkdqhrbals.client.domain.event.EventPublisher
 import org.ghkdqhrbals.client.domain.event.PaperSearchAndStoreEvent
-import org.ghkdqhrbals.client.domain.paper.repository.PaperRepository
+import org.ghkdqhrbals.client.domain.paper.entity.repository.PaperRepository
 import org.ghkdqhrbals.client.domain.paper.service.ArxivApiException
 import org.ghkdqhrbals.client.domain.paper.service.ArxivHttpClient
 import org.ghkdqhrbals.client.domain.paper.service.ArxivService
@@ -165,7 +165,7 @@ class SubscribePaperChunkProcessor(
         logger.debug("   └─ Event ID: ${event.searchEventId}")
 
         // ArXiv에서 논문 검색
-        val papers = arxivService.search(event)
+        val papers = arxivService.analyze(event)
 
         if (papers.isEmpty()) {
             logger.debug("   └─ 검색 결과: 0개")

@@ -1,11 +1,11 @@
 package org.ghkdqhrbals.client.domain.paper.service
 
 import org.ghkdqhrbals.client.config.log.logger
-import org.ghkdqhrbals.client.domain.paper.dto.*
+import org.ghkdqhrbals.client.controller.paper.dto.*
 import org.ghkdqhrbals.client.domain.event.PaperSearchAndStoreEvent
 import org.ghkdqhrbals.client.domain.event.EventPublisher
 import org.ghkdqhrbals.client.domain.event.SummaryEvent
-import org.ghkdqhrbals.client.domain.paper.repository.PaperRepository
+import org.ghkdqhrbals.client.domain.paper.entity.repository.PaperRepository
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Propagation
@@ -29,9 +29,11 @@ class ArxivService(
         return paperRepository.existsByArxivId(arxivId)
     }
 
-    // PaperSearchAndStoreEvent 받아서 신규 논문은 DB에 저장 후 summary 이벤트 발행
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
-    fun search(event: PaperSearchAndStoreEvent): List<SummaryEvent> {
+    /**
+     * 동기 서칭 analyze
+     */
+    @Transactional
+    fun analyze(event: PaperSearchAndStoreEvent): List<SummaryEvent> {
         val response = arxivHttpClient.search(event)
 
         // 1. 이번 응답에서 온 arxivId들만 수집
@@ -39,15 +41,20 @@ class ArxivService(
         if (incomingIds.isEmpty()) return emptyList()
 
         // 2. 그 arxivId들 중에서 이미 DB에 존재하는 애들만 한 번에 조회
-        val existingIds: Set<String?> =
-            paperRepository.findAllByArxivIdIn(incomingIds)
-                .map { it.arxivId }
-                .toSet()
+        val papers = paperRepository.findAllByArxivIdIn(incomingIds)
+        val existingIds: Set<String?> = papers.map { it.arxivId }.toSet()
 
-        // 3. 신규 논문만 필터링
+
+
+        // 3. 신규 논문만 필터링. id
         val newPapers = response.papers.filter { p ->
             val id = p.arxivId
-            id != null && id !in existingIds
+            id!! !in existingIds
+        }
+
+        val summaryNeeded = response.papers.filter { p ->
+            val id = p.arxivId
+            id in papers.filter { it.summary == null }.map { it.arxivId }.toSet()
         }
 
         if (newPapers.isEmpty()) {
@@ -61,20 +68,20 @@ class ArxivService(
         val savedPapers = try {
             paperRepository.saveAll(newPapers.map { it.toPaperEntity() })
             logger().info("✅ 신규 논문 ${newPapers.size}건 DB 저장 완료")
-            newPapers
+            newPapers + summaryNeeded
         } catch (e: Exception) {
             logger().error("❌ 논문 저장 실패: ${e.message}", e)
             // 저장 실패 시에도 Summary 이벤트는 발행하지 않음
             return emptyList()
         }
 
-        // 5. Summary 이벤트 발행
         return savedPapers.map { it.toSummaryEvent() }.toList()
     }
 
     /**
      * 비동기 arXiv 검색 시작 - 이벤트 ID만 즉시 반환
      */
+    @Transactional
     fun searchAsync(
         query: String? = null,
         categories: List<String>? = null,

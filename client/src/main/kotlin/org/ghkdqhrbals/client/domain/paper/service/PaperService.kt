@@ -1,7 +1,7 @@
 package org.ghkdqhrbals.client.domain.paper.service
 
 import org.ghkdqhrbals.client.domain.paper.entity.PaperEntity
-import org.ghkdqhrbals.client.domain.paper.repository.PaperRepository
+import org.ghkdqhrbals.client.domain.paper.entity.repository.PaperRepository
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 

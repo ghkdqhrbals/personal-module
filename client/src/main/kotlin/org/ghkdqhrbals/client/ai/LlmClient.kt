@@ -2,7 +2,7 @@ package org.ghkdqhrbals.client.ai
 
 import org.ghkdqhrbals.client.config.Jackson
 import org.ghkdqhrbals.client.config.log.logger
-import org.ghkdqhrbals.client.domain.paper.dto.PaperAnalysisResponse
+import org.ghkdqhrbals.client.controller.paper.dto.PaperAnalysisResponse
 
 interface LlmClient {
     suspend fun createChatCompletion(request: ChatRequest): ChatResponse

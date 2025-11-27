@@ -1,4 +1,4 @@
-package org.ghkdqhrbals.client.domain.event
+package org.ghkdqhrbals.client.domain.event.listener
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
@@ -10,8 +10,11 @@ import org.ghkdqhrbals.client.config.Jackson
 import org.ghkdqhrbals.client.config.log.logger
 import org.ghkdqhrbals.client.config.log.LogTitle
 import org.ghkdqhrbals.client.config.log.title
-import org.ghkdqhrbals.client.domain.paper.repository.PaperRepository
+import org.ghkdqhrbals.client.domain.event.SummaryEvent
+import org.ghkdqhrbals.client.domain.paper.entity.repository.PaperRepository
 import org.springframework.beans.factory.annotation.Value
+import org.springframework.context.SmartLifecycle
+import org.springframework.context.annotation.DependsOn
 import org.springframework.data.redis.connection.stream.Consumer
 import org.springframework.data.redis.connection.stream.MapRecord
 import org.springframework.data.redis.connection.stream.ReadOffset
@@ -21,9 +24,8 @@ import org.springframework.data.redis.stream.StreamListener
 import org.springframework.data.redis.stream.StreamMessageListenerContainer
 import org.springframework.stereotype.Component
 import java.time.Duration
-import java.time.OffsetDateTime
-import kotlinx.serialization.json.Json
-
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.TimeUnit
 
 /**
  * SummaryEvent 리스너
@@ -32,6 +34,7 @@ import kotlinx.serialization.json.Json
  * - Redis 진행상태 업데이트
  */
 @Component
+@DependsOn("redisConnectionFactory")
 class SummaryStreamListener(
     private val redisTemplate: StringRedisTemplate,
     private val llmClient: LlmClient,
@@ -41,20 +44,35 @@ class SummaryStreamListener(
     @Value("\${redis.stream.summary.consumer-count:20}") private val consumerCount: Int,
     @Value("\${redis.stream.summary.poll-timeout-ms:3000}") private val pollTimeoutMs: Long,
     @Value("\${redis.stream.summary.consumer-name-prefix:summary-consumer}") private val consumerNamePrefix: String,
-) : StreamListener<String, MapRecord<String, String, String>> {
+) : GracefulConsumer() {
 
     private val mapper: ObjectMapper = Jackson.getMapper()
     private lateinit var container: StreamMessageListenerContainer<String, MapRecord<String, String, String>>
 
+    private lateinit var executor: ExecutorService
+
     @PostConstruct
-    fun start() {
+    fun startup() {
+
+    }
+
+    override fun start() {
         initializeConsumerGroup()
+
+        val options = StreamMessageListenerContainer.StreamMessageListenerContainerOptions.builder()
+            .pollTimeout(Duration.ofMillis(pollTimeoutMs))
+            .errorHandler { ex ->
+                if (shuttingDown) {
+                    return@errorHandler
+                }
+
+                logger().error("[StreamContainer] Unexpected error", ex)
+            }
+            .build()
 
         container = StreamMessageListenerContainer.create(
             redisTemplate.connectionFactory!!,
-            StreamMessageListenerContainer.StreamMessageListenerContainerOptions.builder()
-                .pollTimeout(Duration.ofMillis(pollTimeoutMs))
-                .build()
+            options
         )
 
         // consumerCount 개수만큼 여러 컨슈머 등록
@@ -65,11 +83,26 @@ class SummaryStreamListener(
                 StreamOffset.create(streamKey, ReadOffset.lastConsumed()),
                 this
             )
-            logger().title(LogTitle.STREAM, "Registered consumer name=$consumerName for stream=$streamKey")
         }
 
+
         container.start()
-        logger().title(LogTitle.STREAM, "Started listening on stream=$streamKey, consumerCount=$consumerCount, pollTimeoutMs=$pollTimeoutMs")
+        logger().title(
+            LogTitle.STREAM,
+            "Started listening on stream=$streamKey, consumerCount=$consumerCount, pollTimeoutMs=$pollTimeoutMs"
+        )
+
+        if (!running) {
+            running = true
+        }
+    }
+
+    override fun stop() {
+        logger().title(LogTitle.STREAM, "SummaryEvent 리스너 종료 중...")
+        shuttingDown = true
+        container.stop()
+        running = false
+        logger().title(LogTitle.STREAM, "SummaryEvent 리스너 종료 완료")
     }
 
     private fun initializeConsumerGroup() {
@@ -110,7 +143,7 @@ class SummaryStreamListener(
             val event: SummaryEvent = try {
                 mapper.readValue(payload)
             } catch (e: Exception) {
-                logger().error("[SummaryListener] ❌ Failed to parse event payload", e)
+                logger().error("[SummaryListener] ❌ Failed to parse event payload: ${e.message}")
                 logger().error("[SummaryListener] Payload (first 500 chars): ${payload.take(500)}")
                 acknowledge(message)
                 return
@@ -119,7 +152,10 @@ class SummaryStreamListener(
             searchEventId = event.searchEventId
             paperId = event.paperId
 
-            logger().title(LogTitle.SUMMARY,"Processing summary for paperId=${paperId}, searchEventId=${searchEventId}")
+            logger().title(
+                LogTitle.SUMMARY,
+                "Processing summary for paperId=${paperId}, searchEventId=${searchEventId}"
+            )
 
             val startTime = System.currentTimeMillis()
 
@@ -132,19 +168,19 @@ class SummaryStreamListener(
                     event.journalRefRaw
                 )
             } catch (e: IllegalStateException) {
-                logger().error("[SummaryListener] ❌ LLM processing failed for paperId=${paperId}: ${e.message}", e)
+                logger().error("[SummaryListener] ❌ LLM processing failed for paperId=${paperId}: ${e.message}")
                 incrementProgress(searchEventId, "failed")
                 checkAndMarkCompleted(searchEventId)
                 acknowledge(message)
                 return
             } catch (e: com.fasterxml.jackson.core.JsonProcessingException) {
-                logger().error("[SummaryListener] ❌ JSON parsing failed for LLM response, paperId=${paperId}", e)
+                logger().error("[SummaryListener] ❌ JSON parsing failed for LLM response, paperId=${paperId}: ${e.message}")
                 incrementProgress(searchEventId, "failed")
                 checkAndMarkCompleted(searchEventId)
                 acknowledge(message)
                 return
             } catch (e: Exception) {
-                logger().error("[SummaryListener] ❌ Unexpected error during LLM call for paperId=${paperId}", e)
+                logger().error("[SummaryListener] ❌ Unexpected error during LLM call for paperId=${paperId}: ${e.message}")
                 incrementProgress(searchEventId, "failed")
                 checkAndMarkCompleted(searchEventId)
                 acknowledge(message)
@@ -178,7 +214,7 @@ class SummaryStreamListener(
             val updated = paper.copy(
                 summary = analysis.coreContribution,
                 novelty = analysis.noveltyAgainstPreviousWorks,
-                summarizedAt = OffsetDateTime.now(),
+                summarizedAt = java.time.OffsetDateTime.now(),
                 journal = analysis.journalName ?: paper.journal,
                 impactFactor = analysis.impactFactor ?: paper.impactFactor
             )
@@ -205,14 +241,14 @@ class SummaryStreamListener(
             logger().title(LogTitle.SUMMARY, "✅ Completed summary for paperId=${paperId}")
 
         } catch (e: Exception) {
-            logger().error("[SummaryListener] ❌ Unexpected error processing message: id=${message.id}", e)
+            logger().error("[SummaryListener] ❌ Unexpected error processing message: id=${message.id}: ${e.message}")
 
             searchEventId?.let {
                 try {
                     incrementProgress(it, "failed")
                     checkAndMarkCompleted(it)
                 } catch (progressError: Exception) {
-                    logger().error("[SummaryListener] Failed to update progress", progressError)
+                    logger().error("[SummaryListener] Failed to update progress: ${progressError.message}")
                 }
             }
 
@@ -225,7 +261,7 @@ class SummaryStreamListener(
             redisTemplate.opsForStream<String, String>()
                 .acknowledge(streamKey, groupName, message.id)
         } catch (e: Exception) {
-            logger().error("[SummaryListener] Failed to acknowledge message: id=${message.id}", e)
+            logger().error("[SummaryListener] Failed to acknowledge message: id=${message.id}: ${e.message}")
         }
     }
 
@@ -251,14 +287,22 @@ class SummaryStreamListener(
             if (status != "COMPLETED") {
                 redisTemplate.opsForHash<String, String>().put(key, "status", "COMPLETED")
                 redisTemplate.expire(key, 3600, java.util.concurrent.TimeUnit.SECONDS)
-                logger().title(LogTitle.SUMMARY, "🎉 All summaries completed for searchEventId=$searchEventId (total=$total, completed=$completed, failed=$failed)")
+                logger().title(
+                    LogTitle.SUMMARY,
+                    "🎉 All summaries completed for searchEventId=$searchEventId (total=$total, completed=$completed, failed=$failed)"
+                )
             }
         }
     }
 
     @PreDestroy
     fun shutdown() {
-        container.stop()
+        shuttingDown = true
+        runCatching { container.stop() }
+        runCatching {
+            executor.shutdown()
+            executor.awaitTermination(3, TimeUnit.SECONDS)
+        }
         logger().title(LogTitle.STREAM, "Stopped")
     }
 }
