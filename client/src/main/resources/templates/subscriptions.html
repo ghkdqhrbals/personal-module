@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+    <title>구독 관리 - NotiPaper</title>
+</head>
+
+<body>
+
+<div layout:fragment="content">
+
+    <h1 class="text-3xl font-bold mb-2">구독 관리</h1>
+    <p class="text-gray-600 mb-8">관심있는 연구 주제를 구독하고 최신 논문 알림을 받으세요</p>
+
+    <!-- Error Message -->
+    <div th:if="${error}" class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-6">
+        <p th:text="${error}"></p>
+    </div>
+
+    <!-- Tabs -->
+    <div class="mb-8 border-b">
+        <div class="flex space-x-8">
+            <button onclick="showTab('my-subscriptions')"
+                    class="tab-button pb-4 px-2 font-medium border-b-2 border-blue-500 text-blue-600">
+                내 구독 (<span th:text="${userSubscriptions?.size() ?: 0}">0</span>)
+            </button>
+            <button onclick="showTab('all-subscriptions')"
+                    class="tab-button pb-4 px-2 font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700">
+                전체 주제 (<span th:text="${allSubscribes?.size() ?: 0}">0</span>)
+            </button>
+        </div>
+    </div>
+
+    <!-- My Subscriptions Tab -->
+    <div id="my-subscriptions" class="tab-content">
+        <div th:if="${userSubscriptions != null and !userSubscriptions.isEmpty()}">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div th:each="subscription : ${userSubscriptions}"
+                     class="bg-white p-6 rounded-xl border shadow-sm hover:shadow-md transition">
+                    <div class="flex items-start justify-between">
+                        <div class="flex-1">
+                            <div class="flex items-center space-x-2 mb-2">
+                                <h3 class="text-lg font-semibold" th:text="${subscription.subscribe.name}">주제명</h3>
+                                <span class="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded"
+                                      th:text="${subscription.subscribe.subscribeType}">KEYWORD</span>
+                            </div>
+                            <p class="text-sm text-gray-600 mb-3"
+                               th:text="${subscription.subscribe.description ?: '설명 없음'}">설명</p>
+
+                            <div class="flex items-center space-x-4 text-xs text-gray-500">
+                                <span>
+                                    🔔 알림:
+                                    <span th:text="${subscription.notificationEnabled ? '켜짐' : '꺼짐'}"
+                                          th:class="${subscription.notificationEnabled ? 'text-green-600' : 'text-gray-400'}">
+                                        켜짐
+                                    </span>
+                                </span>
+                                <span>⭐ 우선순위: <span th:text="${subscription.priority}">3</span></span>
+                                <span>📅 <span th:text="${#temporals.format(subscription.subscribedAt, 'yyyy-MM-dd')}">2024-01-01</span></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mt-4 pt-4 border-t flex space-x-2">
+                        <button onclick="toggleNotification(this)"
+                                th:attr="data-subscription-id=${subscription.id}"
+                                class="flex-1 px-3 py-2 text-sm border rounded-lg hover:bg-gray-50">
+                            <span th:if="${subscription.notificationEnabled}">🔕 알림 끄기</span>
+                            <span th:unless="${subscription.notificationEnabled}">🔔 알림 켜기</span>
+                        </button>
+                        <button onclick="unsubscribe(this)"
+                                th:attr="data-subscription-id=${subscription.id}"
+                                class="px-3 py-2 text-sm text-red-600 border border-red-200 rounded-lg hover:bg-red-50">
+                            구독 취소
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Empty State -->
+        <div th:if="${userSubscriptions == null or userSubscriptions.isEmpty()}"
+             class="text-center py-16 bg-white rounded-xl border">
+            <div class="text-6xl mb-4">📭</div>
+            <p class="text-gray-600 mb-4">아직 구독중인 주제가 없습니다</p>
+            <button onclick="showTab('all-subscriptions')"
+                    class="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">
+                주제 탐색하기
+            </button>
+        </div>
+    </div>
+
+    <!-- All Subscriptions Tab -->
+    <div id="all-subscriptions" class="tab-content hidden">
+        <!-- Category Filter -->
+        <div class="mb-6 flex items-center space-x-3">
+            <span class="text-sm font-medium">필터:</span>
+            <select onchange="filterByType(this.value)"
+                    class="px-3 py-2 border rounded-lg text-sm">
+                <option value="ALL">전체</option>
+                <option value="CATEGORY">카테고리</option>
+                <option value="KEYWORD">키워드</option>
+                <option value="AUTHOR">저자</option>
+                <option value="CUSTOM">커스텀</option>
+            </select>
+        </div>
+
+        <div th:if="${allSubscribes != null and !allSubscribes.isEmpty()}">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div th:each="subscribe : ${allSubscribes}"
+                     th:attr="data-type=${subscribe.subscribeType}"
+                     class="subscribe-card bg-white p-5 rounded-xl border shadow-sm hover:shadow-md transition">
+                    <div class="mb-3">
+                        <div class="flex items-center justify-between mb-2">
+                            <h3 class="font-semibold" th:text="${subscribe.name}">주제명</h3>
+                            <span class="text-xs px-2 py-1 bg-gray-100 text-gray-700 rounded"
+                                  th:text="${subscribe.subscribeType}">TYPE</span>
+                        </div>
+                        <p class="text-sm text-gray-600"
+                           th:text="${subscribe.description ?: '설명 없음'}">설명</p>
+                    </div>
+
+                    <button onclick="subscribeToTopic(this)"
+                            th:attr="data-subscribe-id=${subscribe.id}"
+                            class="w-full px-4 py-2 bg-blue-500 text-white text-sm rounded-lg hover:bg-blue-600">
+                        + 구독하기
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Empty State -->
+        <div th:if="${allSubscribes == null or allSubscribes.isEmpty()}"
+             class="text-center py-16 bg-white rounded-xl border">
+            <div class="text-6xl mb-4">📦</div>
+            <p class="text-gray-600">사용 가능한 구독 주제가 없습니다</p>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    function showTab(tabName) {
+        // Hide all tabs
+        document.querySelectorAll('.tab-content').forEach(tab => {
+            tab.classList.add('hidden');
+        });
+
+        // Remove active state from all buttons
+        document.querySelectorAll('.tab-button').forEach(btn => {
+            btn.classList.remove('border-blue-500', 'text-blue-600');
+            btn.classList.add('border-transparent', 'text-gray-500');
+        });
+
+        // Show selected tab
+        document.getElementById(tabName).classList.remove('hidden');
+
+        // Set active button
+        event.target.classList.remove('border-transparent', 'text-gray-500');
+        event.target.classList.add('border-blue-500', 'text-blue-600');
+    }
+
+    function filterByType(type) {
+        const cards = document.querySelectorAll('.subscribe-card');
+        cards.forEach(card => {
+            if (type === 'ALL' || card.dataset.type === type) {
+                card.style.display = 'block';
+            } else {
+                card.style.display = 'none';
+            }
+        });
+    }
+
+    async function subscribeToTopic(button) {
+        const subscribeId = button.dataset.subscribeId;
+        const userId = 1; // TODO: Get from session
+
+        try {
+            const response = await fetch(`/api/subscriptions/user/${userId}/subscribe/${subscribeId}`, {
+                method: 'POST'
+            });
+
+            if (response.ok) {
+                alert('구독이 추가되었습니다!');
+                location.reload();
+            } else {
+                const error = await response.text();
+                alert('구독 추가 실패: ' + error);
+            }
+        } catch (error) {
+            alert('오류가 발생했습니다: ' + error);
+        }
+    }
+
+    async function unsubscribe(button) {
+        if (!confirm('정말 구독을 취소하시겠습니까?')) {
+            return;
+        }
+
+        const subscriptionId = button.dataset.subscriptionId;
+        const userId = 1; // TODO: Get from session
+
+        try {
+            const response = await fetch(`/api/subscriptions/user/${userId}/subscribe/${subscriptionId}`, {
+                method: 'DELETE'
+            });
+
+            if (response.ok || response.status === 204) {
+                alert('구독이 취소되었습니다.');
+                location.reload();
+            } else {
+                alert('구독 취소 실패');
+            }
+        } catch (error) {
+            alert('오류가 발생했습니다: ' + error);
+        }
+    }
+
+    async function toggleNotification(button) {
+        // TODO: Implement notification toggle API
+        alert('알림 설정 기능은 준비중입니다.');
+    }
+</script>
+
+</body>
+</html>
+

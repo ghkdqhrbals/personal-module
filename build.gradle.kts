@@ -17,6 +17,13 @@ subprojects {
     plugins.withId("org.jetbrains.kotlin.jvm") {
         extensions.configure<KotlinJvmProjectExtension>("kotlin") { jvmToolchain(21) }
     }
+
+    // org.ghkdqhrbals:oauth 좌표를 로컬 :oauth 프로젝트로 치환
+    configurations.configureEach {
+        resolutionStrategy.dependencySubstitution {
+            substitute(module("org.ghkdqhrbals:oauth")).using(project(":oauth"))
+        }
+    }
 }
 
 // Root aggregator tasks

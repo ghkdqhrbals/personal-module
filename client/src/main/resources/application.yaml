@@ -1,6 +1,29 @@
 spring:
+  batch:
+    jdbc:
+      initialize-schema: always  # 부트가 기동하면서 BATCH_* 테이블 자동 생성
+    job:
+      enabled: true             # 애플리케이션 기동 시 자동 Job 실행 막기
+  jackson:
+    time-zone: UTC
   application:
     name: client
+  quartz:
+    job-store-type: memory
+    auto-startup: true
+  thymeleaf:
+    enabled: true
+    cache: false
+    prefix: classpath:/templates/
+    suffix: .html
+    mode: HTML
+
+  web:
+    resources:
+      static-locations: classpath:/static/
+      cache:
+        period: 0
+
   output:
     ansi:
       enabled: ALWAYS
@@ -19,13 +42,21 @@ spring:
         fail-fast: false
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://database-1.chmscg6ww41e.ap-northeast-2.rds.amazonaws.com:3306/paper?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul
+    url: jdbc:mysql://localhost:3306/main
+    hikari:
+      username: root
   jpa:
     hibernate:
-      ddl-auto: none
+      ddl-auto: none  # Flyway로 스키마 관리
     show-sql: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    clean-disabled: true  # Production에서는 clean 비활성화
     properties:
       hibernate:
+        jdbc.time_zone: UTC
         format_sql: true
         dialect: org.hibernate.dialect.MySQLDialect
 
@@ -61,9 +92,11 @@ arxiv:
     rate-limit-multiplier: 2
     exponential-backoff: true
 
+  redis:
+    host: localhost
+    port: 6379
+
 redis:
-  host: localhost
-  port: 6379
   stream:
     summary: paper:summary:stream
     group: paper-summary-group
@@ -75,3 +108,25 @@ redis:
     consumer:
       name: paper-summary-consumer-1
       threads: 50
+
+# 홈 진입시 로그인 페이지로 유도하고 싶다면 아래를 사용하세요.
+# server:
+#   servlet:
+#     context-path: /
+
+# SpringDoc/Swagger 설정
+springdoc:
+  api-docs:
+    enabled: true
+  swagger-ui:
+    enabled: true
+    path: /swagger-ui.html
+  default-produces-media-type: application/json
+  default-consumes-media-type: application/json
+  model-and-view-allowed: true
+
+oauth:
+  enable-providers: true
+  providers:
+    kakao:
+      scopes: profile_nickname, account_email

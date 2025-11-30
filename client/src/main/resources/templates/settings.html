@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org"
+      xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/base}">
+<head>
+  <title>Settings - NotiPaper</title>
+</head>
+
+<body>
+
+<div layout:fragment="content">
+
+  <h1 class="text-3xl font-bold mb-8">Settings</h1>
+
+  <form th:action="@{/settings}" th:method="post" class="space-y-8">
+
+    <!-- AI Summary Settings -->
+    <div class="bg-white p-6 rounded-xl border shadow-sm">
+      <h2 class="text-lg font-semibold mb-4">AI Summary Settings</h2>
+
+      <label class="flex items-center justify-between">
+        <div>
+          <div class="font-medium">Auto-generate Summaries</div>
+          <p class="text-gray-500 text-sm">Automatically generate AI summaries for newly added papers</p>
+        </div>
+
+        <input type="checkbox"
+               th:field="*{autoSummary}"
+               class="w-5 h-5 accent-blue-600">
+      </label>
+    </div>
+
+    <!-- Notification Preferences -->
+    <div class="bg-white p-6 rounded-xl border shadow-sm">
+      <h2 class="text-lg font-semibold mb-4">Notification Preferences</h2>
+
+      <div class="space-y-4">
+
+        <label class="flex items-center justify-between">
+          <div>
+            <div class="font-medium">Email Notifications</div>
+            <p class="text-gray-500 text-sm">Receive email notifications for all updates</p>
+          </div>
+          <input type="checkbox" th:field="*{emailNoti}"
+                 class="w-5 h-5 accent-blue-600">
+        </label>
+
+        <label class="flex items-center justify-between">
+          <div>
+            <div class="font-medium">Paper Update Alerts</div>
+            <p class="text-gray-500 text-sm">Get notified when tracked papers are updated</p>
+          </div>
+          <input type="checkbox" th:field="*{updateAlerts}"
+                 class="w-5 h-5 accent-blue-600">
+        </label>
+
+        <label class="flex items-center justify-between">
+          <div>
+            <div class="font-medium">Weekly Digest</div>
+            <p class="text-gray-500 text-sm">Receive a weekly summary of all paper updates</p>
+          </div>
+          <input type="checkbox" th:field="*{weeklyDigest}"
+                 class="w-5 h-5 accent-blue-600">
+        </label>
+
+      </div>
+    </div>
+
+    <button type="submit"
+            class="px-6 py-2 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700">
+      Save Settings
+    </button>
+
+  </form>
+
+</div>
+
+</body>
+</html>

@@ -10,8 +10,7 @@ import io.ktor.client.*
 import io.ktor.client.plugins.api.*
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
-import org.ghkdqhrbals.client.config.logger
+import org.ghkdqhrbals.client.config.log.logger
 import kotlin.time.Duration.Companion.seconds
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.max

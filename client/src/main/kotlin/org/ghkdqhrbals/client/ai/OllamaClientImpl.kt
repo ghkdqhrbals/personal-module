@@ -1,14 +1,12 @@
 package org.ghkdqhrbals.client.ai
 
 import org.ghkdqhrbals.client.config.Jackson
-import org.ghkdqhrbals.client.config.logger
+import org.ghkdqhrbals.client.config.log.logger
 import org.springframework.web.client.RestClient
 import java.util.concurrent.atomic.AtomicInteger
 import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonInclude.Include
-import org.ghkdqhrbals.client.config.setting
-
-import org.ghkdqhrbals.client.config.title
+import org.ghkdqhrbals.client.config.log.setting
 
 /**
  * Ollama 로컬 모델을 사용하는 LLM 클라이언트 - RestClient 기반

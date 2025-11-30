@@ -1,5 +1,8 @@
 package org.ghkdqhrbals.client.config
 
+import org.ghkdqhrbals.client.config.interceptor.ApiCallInterceptor
+import org.ghkdqhrbals.client.config.log.ExternalApiLog
+import org.ghkdqhrbals.client.config.log.logger
 import org.springframework.stereotype.Component
 import org.springframework.http.HttpRequest
 import org.springframework.http.client.ClientHttpRequestExecution

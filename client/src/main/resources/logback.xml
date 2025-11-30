@@ -11,7 +11,7 @@
                     class="org.springframework.boot.logging.logback.ExtendedWhitespaceThrowableProxyConverter"/>
 
     <conversionRule conversionWord="thread7"
-                    class="org.ghkdqhrbals.client.config.LogConverter" />
+                    class="org.ghkdqhrbals.client.config.log.LogConverter" />
 
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
