@@ -32,10 +32,12 @@ class Subscribe(
     var id: Long = 0
 
     @CreationTimestamp
-    var createdAt: OffsetDateTime = OffsetDateTime.now()
+    @Column(columnDefinition = "DATETIME(6)", nullable = true)
+    var createdAt: OffsetDateTime? = OffsetDateTime.now()
 
     @UpdateTimestamp
-    var updatedAt: OffsetDateTime = OffsetDateTime.now()
+    @Column(columnDefinition = "DATETIME(6)", nullable = true)
+    var updatedAt: OffsetDateTime? = OffsetDateTime.now()
 
     @OneToMany(mappedBy = "subscribe", cascade = [CascadeType.ALL])
     var userSubscribes: MutableList<UserSubscribe> = mutableListOf()

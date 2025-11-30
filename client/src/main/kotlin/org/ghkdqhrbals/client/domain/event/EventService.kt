@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import org.ghkdqhrbals.client.config.log.logger
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
-import java.time.Instant
+import java.time.OffsetDateTime
 import org.ghkdqhrbals.client.config.Jackson
 
 /**
@@ -97,7 +97,7 @@ class EventService(
     /**
      * 특정 시간 이후 이벤트 조회
      */
-    fun getEventsAfter(timestamp: Instant): List<EventStoreEntity> {
+    fun getEventsAfter(timestamp: OffsetDateTime): List<EventStoreEntity> {
         return eventStoreRepository.findByTimestampAfterOrderByTimestampAsc(timestamp)
     }
 

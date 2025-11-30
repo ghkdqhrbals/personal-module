@@ -1,6 +1,7 @@
 package org.ghkdqhrbals.client.domain.event
 
-import java.time.Instant
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
 import java.util.*
 
 /**
@@ -10,7 +11,7 @@ interface DomainEvent {
     val eventId: String
     val aggregateId: String
     val eventType: String
-    val timestamp: Instant
+    val timestamp: OffsetDateTime
     val version: Long
     val metadata: Map<String, Any>
 }
@@ -22,7 +23,7 @@ abstract class BaseDomainEvent(
     override val eventId: String = UUID.randomUUID().toString(),
     override val aggregateId: String,
     override val eventType: String,
-    override val timestamp: Instant = Instant.now(),
+    override val timestamp: OffsetDateTime = OffsetDateTime.now(ZoneOffset.UTC),
     override val version: Long,
     override val metadata: Map<String, Any> = emptyMap()
 ) : DomainEvent
@@ -34,7 +35,7 @@ sealed class PaperEvent(
     eventId: String = UUID.randomUUID().toString(),
     aggregateId: String,
     eventType: String,
-    timestamp: Instant = Instant.now(),
+    timestamp: OffsetDateTime = OffsetDateTime.now(ZoneOffset.UTC),
     version: Long,
     metadata: Map<String, Any> = emptyMap()
 ) : BaseDomainEvent(eventId, aggregateId, eventType, timestamp, version, metadata)

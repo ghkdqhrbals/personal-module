@@ -160,23 +160,15 @@ class SubscribePaperChunkProcessor(
         val pageRequest = PageRequest.of(page, pageSize)
         val event = subscribe.toPaperSearchAndStoreEvent(pageRequest)
 
-        logger.debug("   ├─ ArXiv Query: '${event.query}'")
-        logger.debug("   ├─ Page Request: page=${page}, size=${pageSize}")
-        logger.debug("   └─ Event ID: ${event.searchEventId}")
-
-        // ArXiv에서 논문 검색
-        val papers = arxivService.analyze(event)
-
-        if (papers.isEmpty()) {
-            logger.debug("   └─ 검색 결과: 0개")
-            return 0
-        }
+        // ArXiv에서 논문 검색 및 신규논문 저장
+        val papers = arxivService.analyze(event)?: return 0
+        val map = papers.keys.map { it.toSummaryEvent() }
 
         logger.debug("   └─ 검색 결과: ${papers.size}개 논문 발견")
 
         // 직접 요약 실행
         runBlocking {
-            papers.forEach { event ->
+            map.forEach { event ->
                 val analysis = llmClient.summarizePaper(
                     event.abstract ?: "",
                     event.maxLength,

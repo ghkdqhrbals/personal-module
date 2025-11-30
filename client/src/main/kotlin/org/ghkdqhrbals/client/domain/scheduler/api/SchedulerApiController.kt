@@ -9,8 +9,8 @@ import org.quartz.impl.matchers.GroupMatcher
 import org.slf4j.LoggerFactory
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
-import java.time.Instant
-import java.time.ZoneId
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 
 /**
@@ -44,9 +44,10 @@ class SchedulerApiController(
                     version = it.version,
                     numberOfJobsExecuted = it.numberOfJobsExecuted,
                     runningSince = it.runningSince?.let { date ->
-                        Instant.ofEpochMilli(date.time)
-                            .atZone(ZoneId.systemDefault())
-                            .format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+                        OffsetDateTime.ofInstant(
+                            java.time.Instant.ofEpochMilli(date.time),
+                            ZoneOffset.UTC
+                        ).format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
                     }
                 )
             }
@@ -79,14 +80,16 @@ class SchedulerApiController(
                                 triggerGroup = trigger.key.group,
                                 triggerState = scheduler.getTriggerState(trigger.key).name,
                                 nextFireTime = trigger.nextFireTime?.let {
-                                    Instant.ofEpochMilli(it.time)
-                                        .atZone(ZoneId.systemDefault())
-                                        .format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+                                    OffsetDateTime.ofInstant(
+                                        java.time.Instant.ofEpochMilli(it.time),
+                                        ZoneOffset.UTC
+                                    ).format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
                                 },
                                 previousFireTime = trigger.previousFireTime?.let {
-                                    Instant.ofEpochMilli(it.time)
-                                        .atZone(ZoneId.systemDefault())
-                                        .format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+                                    OffsetDateTime.ofInstant(
+                                        java.time.Instant.ofEpochMilli(it.time),
+                                        ZoneOffset.UTC
+                                    ).format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
                                 }
                             )
                         }

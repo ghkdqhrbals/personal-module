@@ -27,7 +27,7 @@ class ArxivHttpClient(
 
     }
 
-    fun search(event: PaperSearchAndStoreEvent): ArxivParseResult {
+    fun search(event: PaperSearchAndStoreEvent): List<ArxivPaper> {
         val url = buildRequestUrl(event.query, event.categories, event.maxResults, event.page)
 
         return try {
@@ -45,14 +45,10 @@ class ArxivHttpClient(
                 )
             }
 
-            if (parseResult.papers.isEmpty()) {
-                logger().info("[PaperSearchAndStoreListener] No papers found")
-            }
             parseResult.papers.sortedByDescending { it.publishedDate }
-            parseResult
         } catch (e: Exception) {
             logger().error("Failed to search papers: ${e.message}", e)
-            ArxivParseResult(emptyList(), 0)
+            emptyList()
         }
     }
 

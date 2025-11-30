@@ -3,7 +3,7 @@ package org.ghkdqhrbals.client.domain.event
 import org.springframework.data.jpa.repository.JpaRepository
 import org.springframework.data.jpa.repository.Query
 import org.springframework.stereotype.Repository
-import java.time.Instant
+import java.time.OffsetDateTime
 
 @Repository
 interface EventStoreRepository : JpaRepository<EventStoreEntity, String> {
@@ -29,7 +29,7 @@ interface EventStoreRepository : JpaRepository<EventStoreEntity, String> {
     /**
      * 특정 시간 이후의 이벤트 조회
      */
-    fun findByTimestampAfterOrderByTimestampAsc(timestamp: Instant): List<EventStoreEntity>
+    fun findByTimestampAfterOrderByTimestampAsc(timestamp: OffsetDateTime): List<EventStoreEntity>
 
     /**
      * Aggregate ID와 이벤트 타입으로 조회

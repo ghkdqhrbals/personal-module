@@ -90,6 +90,9 @@ dependencies {
     // jpa
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     implementation("com.mysql:mysql-connector-j")
+    // Flyway for database migration
+    implementation("org.flywaydb:flyway-core")
+    implementation("org.flywaydb:flyway-mysql")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
@@ -115,9 +118,16 @@ dependencies {
     // test db
     testImplementation("com.h2database:h2")
     // testcontainers
-    testImplementation("org.testcontainers:testcontainers:1.19.3")
+//    testImplementation("org.testcontainers:testcontainers:1.19.3")
     testImplementation("org.testcontainers:junit-jupiter:1.19.3")
+    testImplementation("org.testcontainers:mysql:1.19.3")
+
+    testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
+    testImplementation("org.mockito:mockito-core:5.12.0")
+    testImplementation("org.mockito.kotlin:mockito-kotlin:5.2.1")
+
     testImplementation("com.redis.testcontainers:testcontainers-redis-junit:1.6.4")
+    testImplementation("org.springframework.boot:spring-boot-testcontainers")
 }
 
 kotlin {

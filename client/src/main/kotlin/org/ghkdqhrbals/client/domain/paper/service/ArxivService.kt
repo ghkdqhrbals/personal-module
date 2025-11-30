@@ -5,6 +5,7 @@ import org.ghkdqhrbals.client.controller.paper.dto.*
 import org.ghkdqhrbals.client.domain.event.PaperSearchAndStoreEvent
 import org.ghkdqhrbals.client.domain.event.EventPublisher
 import org.ghkdqhrbals.client.domain.event.SummaryEvent
+import org.ghkdqhrbals.client.domain.paper.entity.PaperEntity
 import org.ghkdqhrbals.client.domain.paper.entity.repository.PaperRepository
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.stereotype.Service
@@ -30,52 +31,43 @@ class ArxivService(
     }
 
     /**
-     * 동기 서칭 analyze
+     * 신규 논문 발견 시 저장하고 SummaryEvent 반환
      */
-    @Transactional
-    fun analyze(event: PaperSearchAndStoreEvent): List<SummaryEvent> {
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    fun analyze(event: PaperSearchAndStoreEvent): Map<ArxivPaper, PaperEntity?>? {
+        val returnMaps = mutableMapOf<ArxivPaper, PaperEntity?>()
+
         val response = arxivHttpClient.search(event)
 
         // 1. 이번 응답에서 온 arxivId들만 수집
-        val incomingIds = response.papers.mapNotNull { it.arxivId }
-        if (incomingIds.isEmpty()) return emptyList()
+        val incomingIds = response.map { it.arxivId }
+        if (incomingIds.isEmpty()) return null
 
         // 2. 그 arxivId들 중에서 이미 DB에 존재하는 애들만 한 번에 조회
         val papers = paperRepository.findAllByArxivIdIn(incomingIds)
         val existingIds: Set<String?> = papers.map { it.arxivId }.toSet()
 
+        // 이미 있는 논문 넣기. 없으면 Null
+        returnMaps.putAll(
+            response.associateWith { paper ->
+                papers.firstOrNull { it.arxivId == paper.arxivId }
+            }
+        )
 
-
-        // 3. 신규 논문만 필터링. id
-        val newPapers = response.papers.filter { p ->
-            val id = p.arxivId
-            id!! !in existingIds
-        }
-
-        val summaryNeeded = response.papers.filter { p ->
-            val id = p.arxivId
-            id in papers.filter { it.summary == null }.map { it.arxivId }.toSet()
-        }
+        // returnMaps 에서 PaperEntity null 인 애들
+        val newPapers = returnMaps.filterValues { it == null }
 
         if (newPapers.isEmpty()) {
             logger().info("신규 논문 없음. totalResponse=${incomingIds.size}")
-            return emptyList()
+            return null
         }
 
         logger().info("📄 신규 논문 ${newPapers.size}건 발견. totalResponse=${incomingIds.size}")
 
-        // 4. 신규 논문을 DB에 저장
-        val savedPapers = try {
-            paperRepository.saveAll(newPapers.map { it.toPaperEntity() })
-            logger().info("✅ 신규 논문 ${newPapers.size}건 DB 저장 완료")
-            newPapers + summaryNeeded
-        } catch (e: Exception) {
-            logger().error("❌ 논문 저장 실패: ${e.message}", e)
-            // 저장 실패 시에도 Summary 이벤트는 발행하지 않음
-            return emptyList()
-        }
+        val saves = paperRepository.saveAll(newPapers.keys.map { it.toPaperEntity() })
 
-        return savedPapers.map { it.toSummaryEvent() }.toList()
+        returnMaps.replaceAll { k, v -> v ?: saves.firstOrNull { it.arxivId == k.arxivId } }
+        return returnMaps
     }
 
     /**

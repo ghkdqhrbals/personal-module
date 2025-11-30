@@ -8,6 +8,7 @@ import org.ghkdqhrbals.client.config.log.logger
 import org.ghkdqhrbals.client.domain.event.SummaryEvent
 import org.ghkdqhrbals.client.controller.paper.dto.Paper
 import org.ghkdqhrbals.client.domain.paper.entity.PaperEntity
+import org.ghkdqhrbals.client.error.CommonException
 import org.jdom2.Element
 import org.jsoup.Jsoup
 import org.springframework.stereotype.Component
@@ -107,24 +108,24 @@ data class ArxivParseResult(
 
 data class ArxivPaper(
     val title: String,
-    val authors: List<String>,
-    val url: String?,
-    val publishedDate: String?,
-    val abstract: String?,
-    val doi: String?,
-    val journalRefRaw: String?
+    val authors: List<String> = emptyList(),
+    val url: String? = null,
+    val publishedDate: String? = null,
+    val abstract: String? = "",
+    val doi: String? = null,
+    val journalRefRaw: String? = null,
+    private val rawArxivId: String? = null
 ) {
     companion object {
         private val ARXIV_ID_REGEX = Regex("arxiv\\.org/abs/([0-9.]+(?:v[0-9]+)?)")
     }
 
-    val arxivId: String? by lazy {
-        url?.let { ARXIV_ID_REGEX.find(it)?.groupValues?.getOrNull(1) }
-    }
+    val arxivId: String get() =
+        rawArxivId
+            ?: url?.let { ARXIV_ID_REGEX.find(it)?.groupValues?.getOrNull(1) }
+            ?: throw CommonException("Invalid arXiv URL: $url")
 
-    val paperId: String by lazy {
-        arxivId ?: java.util.UUID.randomUUID().toString()
-    }
+    val paperId = arxivId
 
     fun toPaper(): Paper = Paper(
         title = title,

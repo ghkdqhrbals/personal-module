@@ -41,7 +41,7 @@ class SearchReader(
     private fun loadNextPage(): List<ArxivPaper>? {
         logger().info("🔄 SearchReader가 페이지 $currentPage 로드 중...")
 
-        val response = client.search(
+        val papers = client.search(
             PaperSearchAndStoreEvent(
                 searchEventId = "search-$query-page$currentPage-${System.currentTimeMillis()}",
                 query = query,
@@ -52,15 +52,15 @@ class SearchReader(
             )
         )
 
-        logger().info("✅ SearchReader 페이지 $currentPage 로드 완료: ${response.papers.size}개 논문")
+        logger().info("✅ SearchReader 페이지 $currentPage 로드 완료: ${papers.size}개 논문")
 
         // 논문이 없으면 종료
-        if (response.papers.isEmpty()) {
+        if (papers.isEmpty()) {
             logger().info("ℹ️ SearchReader 더 이상 논문이 없음 (페이지: $currentPage)")
             return null
         }
 
         currentPage++
-        return response.papers
+        return papers
     }
 }

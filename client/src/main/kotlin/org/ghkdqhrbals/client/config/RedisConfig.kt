@@ -1,33 +1,23 @@
 package org.ghkdqhrbals.client.config
 
-import org.springframework.beans.factory.annotation.Value
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.data.redis.connection.RedisConnectionFactory
-import org.springframework.data.redis.connection.RedisStandaloneConfiguration
-import org.springframework.data.redis.connection.lettuce.LettuceClientConfiguration
-import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.data.redis.serializer.StringRedisSerializer
-import java.time.Duration
 
+/**
+ * Redis 설정
+ * - 테스트 환경에서는 TestContainer의 @ServiceConnection이 자동으로 RedisConnectionFactory를 제공
+ * - Production 환경에서는 spring.redis.host/port 설정 사용
+ */
 @Configuration
-class RedisConfig(
-    @Value("\${redis.host}") private val host: String,
-    @Value("\${redis.port}") private val port: Int
-) {
-
-//    @Bean
-//    fun redisConnectionFactory(): RedisConnectionFactory {
-//        val clientConfig = LettuceClientConfiguration.builder()
-//            .shutdownTimeout(Duration.ofSeconds(3))
-//            .build()
-//        val standalone = RedisStandaloneConfiguration(host, port)
-//        return LettuceConnectionFactory(standalone, clientConfig).apply {
-//            // 초기화
-//            afterPropertiesSet()
-//        }
-//    }
+@ConditionalOnProperty(
+    name = ["spring.redis.host"],
+    matchIfMissing = false
+)
+class RedisConfig {
 
     @Bean
     fun stringRedisTemplate(connectionFactory: RedisConnectionFactory): StringRedisTemplate = StringRedisTemplate().apply {

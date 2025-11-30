@@ -2,6 +2,7 @@ package org.ghkdqhrbals.client.domain.event
 
 import jakarta.persistence.*
 import java.time.Instant
+import java.time.OffsetDateTime
 
 /**
  * 이벤트 저장소 엔티티
@@ -29,8 +30,8 @@ data class EventStoreEntity(
     @Column(name = "payload", nullable = false, columnDefinition = "TEXT")
     val payload: String,
 
-    @Column(name = "timestamp", nullable = false)
-    val timestamp: Instant,
+    @Column(name = "timestamp", columnDefinition = "TIMESTAMP(6)", nullable = false)
+    val timestamp: OffsetDateTime,
 
     @Column(name = "version", nullable = false)
     val version: Long,
@@ -38,7 +39,7 @@ data class EventStoreEntity(
     @Column(name = "metadata", columnDefinition = "TEXT")
     val metadata: String? = null,
 
-    @Column(name = "created_at", nullable = false, updatable = false)
+    @Column(name = "created_at", columnDefinition = "TIMESTAMP(6)", nullable = false, updatable = false)
     val createdAt: Instant = Instant.now()
 )
 

@@ -4,7 +4,7 @@ import org.ghkdqhrbals.client.domain.event.EventService
 import org.ghkdqhrbals.client.domain.event.EventStoreEntity
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
-import java.time.Instant
+import java.time.OffsetDateTime
 
 /**
  * 이벤트 소싱 API 컨트롤러
@@ -40,8 +40,8 @@ class EventSourcingController(
      */
     @GetMapping("/since")
     fun getEventsSince(@RequestParam timestamp: String): ResponseEntity<List<EventResponse>> {
-        val instant = Instant.parse(timestamp)
-        val events = eventService.getEventsAfter(instant)
+        val offsetDateTime = OffsetDateTime.parse(timestamp)
+        val events = eventService.getEventsAfter(offsetDateTime)
         val response = events.map { EventResponse.from(it) }
         return ResponseEntity.ok(response)
     }
@@ -63,7 +63,7 @@ data class EventResponse(
     val eventId: String,
     val aggregateId: String,
     val eventType: String,
-    val timestamp: Instant,
+    val timestamp: OffsetDateTime,
     val version: Long,
     val payload: String,
     val metadata: String?

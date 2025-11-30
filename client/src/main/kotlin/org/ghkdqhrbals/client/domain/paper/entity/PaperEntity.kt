@@ -25,7 +25,7 @@ data class PaperEntity(
     @Column(name = "published_at")
     val publishedAt: LocalDate? = null,
 
-    @Column(name = "search_date")
+    @Column(name = "search_date", columnDefinition = "TIMESTAMP(6)")
     val searchDate: LocalDate? = null,
 
     @Column(name = "summarized_at", columnDefinition = "TIMESTAMP(6)")

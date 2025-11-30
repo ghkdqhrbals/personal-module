@@ -175,10 +175,10 @@ class PaperSearchAndStoreStreamListener(
     }
 
     fun searchAndStore(event: PaperSearchAndStoreEvent): List<ArxivPaper> {
-        val response = arxivHttpClient.search(event)
-        val entities = response.papers.map { it.toPaperEntity() }
+        val papers = arxivHttpClient.search(event)
+        val entities = papers.map { it.toPaperEntity() }
         val savedEntities = paperService.upsertPapersAndGetUnsummarized(entities)
-        val needToSummarize = response.papers.filter { paper ->
+        val needToSummarize = papers.filter { paper ->
             savedEntities.any { it.arxivId == paper.arxivId }
         }
 

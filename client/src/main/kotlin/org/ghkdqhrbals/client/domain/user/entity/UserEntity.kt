@@ -1,18 +1,10 @@
 package org.ghkdqhrbals.client.domain.user.entity
 
+import jakarta.persistence.*
 import org.hibernate.annotations.CreationTimestamp
 import org.hibernate.annotations.UpdateTimestamp
 import java.time.OffsetDateTime
 import java.time.temporal.ChronoUnit
-import jakarta.persistence.CascadeType
-import jakarta.persistence.Entity
-import jakarta.persistence.EnumType
-import jakarta.persistence.Enumerated
-import jakarta.persistence.GeneratedValue
-import jakarta.persistence.GenerationType
-import jakarta.persistence.Id
-import jakarta.persistence.OneToMany
-import jakarta.persistence.Table
 import org.ghkdqhrbals.client.common.generateKey
 import org.ghkdqhrbals.client.domain.user.constant.Gender
 import org.ghkdqhrbals.client.domain.user.constant.Status
@@ -55,29 +47,27 @@ class UserEntity private constructor(
     @Enumerated(EnumType.STRING)
     var status = Status.INIT // 기본적으로 본인인증 이후, 회원가입을 함
 
+    @Column(columnDefinition = "DATETIME(6)")
     var certifiedAt: OffsetDateTime? = null
 
     var note: String? = null
 
     @OneToMany(mappedBy = "user", cascade = [CascadeType.ALL])
     var oauthProviders: MutableList<OauthProvider> = mutableListOf()
+    @Column(columnDefinition = "DATETIME(6)")
     var deletedAt: OffsetDateTime? = null
-    var releaseAt: OffsetDateTime? = null
-
-    var deleteReason: String? = null
 
     @CreationTimestamp
+    @Column(columnDefinition = "DATETIME(6)")
     var createdAt: OffsetDateTime = OffsetDateTime.now()
 
     @UpdateTimestamp
+    @Column(columnDefinition = "DATETIME(6)")
     var updatedAt: OffsetDateTime = OffsetDateTime.now()
+    @Column(columnDefinition = "DATETIME(6)")
     var activatedAt: OffsetDateTime? = null
 
     var migrationId: String? = null
-
-    fun release() {
-        this.releaseAt = OffsetDateTime.now().minusSeconds(1)
-    }
 
     fun maskName(): String {
         return if (name.isEmpty()) {

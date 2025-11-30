@@ -18,11 +18,17 @@ import org.springframework.batch.core.step.builder.StepBuilder
 import org.springframework.batch.item.ItemProcessor
 import org.springframework.batch.item.database.JpaItemWriter
 import org.springframework.batch.item.database.builder.JpaItemWriterBuilder
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.transaction.PlatformTransactionManager
 
 @Configuration
+@ConditionalOnProperty(
+    name = arrayOf("spring.batch.job.enabled"),
+    havingValue = "true",
+    matchIfMissing = true
+)
 class SubscribeBatchJob(
     private val jobRepository: JobRepository,
     private val transactionManager: PlatformTransactionManager,

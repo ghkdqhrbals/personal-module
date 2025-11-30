@@ -27,8 +27,10 @@ class OauthProvider(
     lateinit var user: UserEntity
 
     @CreationTimestamp
-    var createdAt: OffsetDateTime = OffsetDateTime.now()
+    @Column(columnDefinition = "TIMESTAMP(6)")
+    var createdAt: OffsetDateTime? = OffsetDateTime.now()
 
     @UpdateTimestamp
+    @Column(columnDefinition = "TIMESTAMP(6)")
     var updatedAt: OffsetDateTime = OffsetDateTime.now()
 }

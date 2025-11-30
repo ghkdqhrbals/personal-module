@@ -46,7 +46,8 @@ class PaperSubscribe(
     var id: Long = 0
 
     @CreationTimestamp
-    var matchedAt: OffsetDateTime = OffsetDateTime.now()
+    @Column(columnDefinition = "DATETIME(6)", nullable = true)
+    var matchedAt: OffsetDateTime? = OffsetDateTime.now()
 
     /**
      * 높은 관련도 판별 (0.7 이상)
