@@ -1,0 +1,18 @@
+spring:
+  config:
+    activate:
+      on-profile: develop-mysql
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://develop-db-host:3306/main
+    hikari:
+      username: ${DB_USERNAME:root}
+      password: ${DB_PASSWORD:}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: false
+        dialect: org.hibernate.dialect.MySQLDialect

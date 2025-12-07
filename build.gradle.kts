@@ -11,6 +11,9 @@ plugins {
 
 allprojects {
     repositories { mavenCentral() }
+
+    // 모든 프로젝트의 빌드 결과를 build 폴더에 저장
+    layout.buildDirectory = layout.projectDirectory.dir("build")
 }
 
 subprojects {

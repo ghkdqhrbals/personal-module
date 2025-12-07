@@ -64,7 +64,6 @@ services:
           cpus: '1'
           memory: 2G
 
-
 volumes:
   ollama_data:
     driver: local
