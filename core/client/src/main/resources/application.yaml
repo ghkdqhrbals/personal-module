@@ -1,0 +1,18 @@
+
+spring:
+  config:
+    import:
+      - optional:aws-secretsmanager:personal/beta
+      - classpath:application-kafka.yaml
+      - classpath:application-mysql.yaml
+      - classpath:application-common.yaml
+  cloud:
+    aws:
+      region:
+        static: ap-northeast-2
+      credentials:
+        profile:
+          name: default
+      secretsmanager:
+        enabled: true
+        fail-fast: false

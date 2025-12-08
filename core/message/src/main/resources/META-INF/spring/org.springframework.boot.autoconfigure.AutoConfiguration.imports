@@ -1,0 +1,4 @@
+org.ghkdqhrbals.message.MessageModuleConfiguration
+org.ghkdqhrbals.message.kafka.config.KafkaAutoConfiguration
+org.ghkdqhrbals.message.saga.config.SagaMessageConfig
+
