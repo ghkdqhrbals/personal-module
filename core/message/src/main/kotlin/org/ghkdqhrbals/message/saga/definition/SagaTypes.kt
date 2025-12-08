@@ -24,21 +24,21 @@ enum class AiProcessStep(
     val compensationTopic: String?,
     val hasCompensation: Boolean = true
 ) {
-    PREPROCESS_DATA(
-        stepName = "PREPROCESS_DATA",
-        commandTopic = SagaTopics.AiProcess.PREPROCESSING_COMMAND,
-        compensationTopic = SagaTopics.AiProcess.PREPROCESSING_COMPENSATION
-    ),
+//    PREPROCESS_DATA(
+//        stepName = "PREPROCESS_DATA",
+//        commandTopic = SagaTopics.AiProcess.PREPROCESSING_COMMAND,
+//        compensationTopic = SagaTopics.AiProcess.PREPROCESSING_COMPENSATION
+//    ),
     RUN_AI_MODEL(
         stepName = "RUN_AI_MODEL",
         commandTopic = SagaTopics.AiProcess.INFERENCE_COMMAND,
         compensationTopic = SagaTopics.AiProcess.INFERENCE_COMPENSATION
-    ),
-    POSTPROCESS_RESULT(
-        stepName = "POSTPROCESS_RESULT",
-        commandTopic =  SagaTopics.AiProcess.POSTPROCESSING_COMMAND,
-        compensationTopic = SagaTopics.AiProcess.POSTPROCESSING_COMPENSATION
     );
+//    POSTPROCESS_RESULT(
+//        stepName = "POSTPROCESS_RESULT",
+//        commandTopic =  SagaTopics.AiProcess.POSTPROCESSING_COMMAND,
+//        compensationTopic = SagaTopics.AiProcess.POSTPROCESSING_COMPENSATION
+//    );
 
     companion object {
         fun fromStepName(name: String): AiProcessStep? {

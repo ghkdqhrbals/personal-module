@@ -5,6 +5,7 @@ import org.ghkdqhrbals.client.controller.paper.dto.PaperAnalysisResponse
 import org.ghkdqhrbals.model.domain.Jackson
 
 interface LlmClient {
+    val name: LlmClientType
     suspend fun createChatCompletion(request: ChatRequest): ChatResponse
 
     /**

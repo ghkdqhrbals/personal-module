@@ -1,18 +1,13 @@
 package org.ghkdqhrbals.client.ai
 
-import org.ghkdqhrbals.client.controller.paper.dto.PaperAnalysisResponse
-
+/**
+ * No-op LLM 클라이언트 - 아무 동작도 하지 않음
+ */
 class NoopLlmClient : LlmClient {
-    override suspend fun createChatCompletion(request: ChatRequest): ChatResponse {
-        return ChatResponse(
-            id = null,
-            choices = listOf(Choice(message = Message(role = "assistant", content = ""))),
-            usage = null
-        )
-    }
+    override val name: LlmClientType = LlmClientType.NOOP
 
-    override suspend fun summarizePaper(abstract: String, maxLength: Int, journalRef: String?): PaperAnalysisResponse {
-        // OpenAI가 비활성화된 경우 요약은 빈 문자열 반환
-        return PaperAnalysisResponse()
+    override suspend fun createChatCompletion(request: ChatRequest): ChatResponse {
+        throw UnsupportedOperationException("NoopLlmClient does not support createChatCompletion")
     }
 }
+

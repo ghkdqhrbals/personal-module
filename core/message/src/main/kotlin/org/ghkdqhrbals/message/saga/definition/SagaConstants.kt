@@ -12,8 +12,8 @@ object SagaTopics {
     // AI Process Topics
     object AiProcess {
 
-        const val PREPROCESSING_COMMAND = "ai-preprocessing-command"
-        const val PREPROCESSING_COMPENSATION = "ai-preprocessing-compensation"
+//        const val PREPROCESSING_COMMAND = "ai-preprocessing-command"
+//        const val PREPROCESSING_COMPENSATION = "ai-preprocessing-compensation"
 
         const val INFERENCE_COMMAND = "ai-inference-command"
         const val INFERENCE_COMPENSATION = "ai-inference-compensation"
@@ -44,10 +44,10 @@ object SagaTopics {
     fun getAllCommandTopics(): List<String> {
         return listOf(
             // AI Process
-            AiProcess.PREPROCESSING_COMMAND,
+//            AiProcess.PREPROCESSING_COMMAND,
             AiProcess.INFERENCE_COMMAND,
-            AiProcess.POSTPROCESSING_COMMAND,
-            AiProcess.STORAGE_COMMAND,
+//            AiProcess.POSTPROCESSING_COMMAND,
+//            AiProcess.STORAGE_COMMAND,
             // AI Batch Inference
             AiBatchInference.BATCH_LOADER_COMMAND,
             AiBatchInference.BATCH_INFERENCE_COMMAND,
@@ -62,7 +62,7 @@ object SagaTopics {
     fun getAllCompensationTopics(): List<String> {
         return listOf(
             // AI Process
-            AiProcess.PREPROCESSING_COMPENSATION,
+//            AiProcess.PREPROCESSING_COMPENSATION,
             AiProcess.INFERENCE_COMPENSATION,
             AiProcess.POSTPROCESSING_COMPENSATION,
             // AI Batch Inference

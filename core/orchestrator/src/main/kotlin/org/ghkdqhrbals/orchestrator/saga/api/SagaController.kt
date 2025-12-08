@@ -10,11 +10,14 @@ import io.swagger.v3.oas.annotations.tags.Tag
 import org.ghkdqhrbals.model.event.SagaEventType
 import org.ghkdqhrbals.message.saga.definition.SagaType
 import org.ghkdqhrbals.orchestrator.saga.orchestrator.SagaOrchestrator
+import org.ghkdqhrbals.orchestrator.saga.service.SagaEventStreamService
 import org.ghkdqhrbals.message.service.EventStoreService
 import org.ghkdqhrbals.repository.event.SagaStateEntity
 import org.ghkdqhrbals.repository.event.EventStoreEntity
 import org.springframework.http.ResponseEntity
+import org.springframework.http.MediaType
 import org.springframework.web.bind.annotation.*
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter
 
 /**
  * Saga 관리 REST API
@@ -24,7 +27,8 @@ import org.springframework.web.bind.annotation.*
 @RequestMapping("/api/saga")
 class SagaController(
     private val sagaOrchestrator: SagaOrchestrator,
-    private val eventStoreService: EventStoreService
+    private val eventStoreService: EventStoreService,
+    private val sagaEventStreamService: SagaEventStreamService
 ) {
 
     /**
@@ -104,6 +108,33 @@ class SagaController(
     }
 
     /**
+     * Saga 이벤트 소싱 전체 데이터 조회 (이벤트 + 최종 상태)
+     */
+    @Operation(
+        summary = "Saga 이벤트 소싱 전체 조회",
+        description = "특정 Saga의 모든 이벤트와 최종 상태를 함께 조회합니다. Event Sourcing 패턴으로 저장된 모든 데이터를 반환합니다."
+    )
+    @ApiResponses(
+        value = [
+            ApiResponse(
+                responseCode = "200",
+                description = "조회 성공"
+            ),
+            ApiResponse(responseCode = "404", description = "Saga를 찾을 수 없음")
+        ]
+    )
+    @GetMapping("/{sagaId}/event-sourcing")
+    fun getSagaEventSourcing(
+        @Parameter(description = "Saga ID", required = true)
+        @PathVariable sagaId: String
+    ): ResponseEntity<Any> {
+        val eventSourcing = eventStoreService.getSagaEventSourcing(sagaId)
+            ?: return ResponseEntity.notFound().build()
+
+        return ResponseEntity.ok(eventSourcing)
+    }
+
+    /**
      * 활성 Saga 목록 조회
      */
     @Operation(
@@ -128,6 +159,46 @@ class SagaController(
         // SagaType enum에서 모든 타입 가져옴
         val types = SagaType.entries.map { SagaTypeInfo(it.name, it.description) }
         return ResponseEntity.ok(types)
+    }
+
+    /**
+     * SSE를 통한 Saga 이벤트 실시간 스트리밍
+     */
+    @Operation(
+        summary = "Saga 이벤트 실시간 스트리밍 (SSE)",
+        description = """
+            Server-Sent Events(SSE)를 통해 특정 Saga의 이벤트를 실시간으로 수신합니다.
+            
+            연결 후 다음 이벤트들을 수신할 수 있습니다:
+            - connected: 초기 연결 확인
+            - saga-event: Saga 상태 변경 이벤트
+            
+            이벤트 데이터에는 현재 Saga 상태, 스텝 정보, 성공/실패 여부 등이 포함됩니다.
+        """
+    )
+    @ApiResponses(
+        value = [
+            ApiResponse(
+                responseCode = "200",
+                description = "SSE 스트림 연결 성공"
+            ),
+            ApiResponse(responseCode = "404", description = "Saga를 찾을 수 없음")
+        ]
+    )
+    @GetMapping("/{sagaId}/stream", produces = [MediaType.TEXT_EVENT_STREAM_VALUE])
+    fun streamSagaEvents(
+        @Parameter(description = "Saga ID", required = true)
+        @PathVariable sagaId: String
+    ): SseEmitter {
+        // Saga 존재 여부 확인
+        val state = eventStoreService.getSagaState(sagaId)
+            ?: throw IllegalArgumentException("Saga not found: $sagaId")
+        if (state.isCompleted()) {
+            sagaEventStreamService.publishEvent(sagaId, "Saga already completed")
+        }
+
+
+        return sagaEventStreamService.createEmitter(sagaId)
     }
 }
 

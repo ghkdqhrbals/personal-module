@@ -1,22 +1,25 @@
 package org.ghkdqhrbals.client.ai
 
 import org.ghkdqhrbals.client.config.log.logger
-import org.springframework.web.client.RestClient
 import java.util.concurrent.atomic.AtomicInteger
 import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonInclude.Include
+import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker
 import org.ghkdqhrbals.client.config.log.setting
 import org.ghkdqhrbals.model.domain.Jackson
+import org.springframework.stereotype.Component
+import org.springframework.web.reactive.function.client.WebClient
 
 /**
- * Ollama 로컬 모델을 사용하는 LLM 클라이언트 - RestClient 기반
+ * Ollama 로컬 모델을 사용하는 LLM 클라이언트 - WebClient 기반 + Circuit Breaker
  */
-class OllamaClientImpl(
+open class OllamaClientImpl(
     private val modelName: String,
     private val ollamaUrl: String,
-    private val restClient: RestClient,
+    private val webClient: WebClient
 ) : LlmClient {
 
+    override val name: LlmClientType = LlmClientType.OLLAMA
     init {
         logger().setting("ollamaUrl=$ollamaUrl, modelName=$modelName")
     }
@@ -27,20 +30,24 @@ class OllamaClientImpl(
     private val mapper = Jackson.getMapper()
 
     @JsonInclude(Include.NON_NULL)
-    data class OllamaRequest(
+    data class OllamaChatRequest(
         val model: String,
-        val prompt: String,
+        val messages: List<OllamaChatMessage>,
         val temperature: Double? = null,
         val stream: Boolean = false
     )
 
-    data class OllamaResponse(
+    data class OllamaChatMessage(
+        val role: String,
+        val content: String
+    )
+
+    data class OllamaChatResponse(
         val model: String,
         val created_at: String,
-        val response: String,
+        val message: OllamaChatMessage,
         val done: Boolean,
         val done_reason: String? = null,
-        val context: List<Int>? = null,
         val total_duration: Long? = null,
         val load_duration: Long? = null,
         val prompt_eval_count: Int? = null,
@@ -49,48 +56,69 @@ class OllamaClientImpl(
         val eval_duration: Long? = null
     )
 
+    @CircuitBreaker(name = "ollama", fallbackMethod = "circuitBreakerFallback")
     override suspend fun createChatCompletion(request: ChatRequest): ChatResponse {
-        return createChatCompletionBlocking(request)
+        logger().info("🔌 [Before] Ollama 요청 시작")
+        return try {
+            val response = executeOllamaRequest(request)
+            logger().info("🔌 [After Success] Ollama 요청 성공")
+            response
+        } catch (e: io.github.resilience4j.circuitbreaker.CallNotPermittedException) {
+            logger().error("🔌 [Circuit Open] 요청 차단됨 - Circuit이 OPEN 상태")
+            throw e
+        } catch (e: Exception) {
+            logger().error("🔌 [After Error] Ollama 요청 실패: {}", e.message)
+            throw e
+        }
     }
 
-    fun createChatCompletionBlocking(request: ChatRequest): ChatResponse {
+    /**
+     * Circuit Breaker fallback 메서드
+     * Circuit이 OPEN된 경우 호출됨
+     */
+    open fun circuitBreakerFallback(request: ChatRequest, e: Exception): ChatResponse {
+        logger().warn("🔌 [Fallback] Ollama 서비스 이용 불가 - Circuit이 OPEN됨")
+        throw e
+    }
+
+    private fun executeOllamaRequest(request: ChatRequest): ChatResponse {
         val requestId = totalRequests.incrementAndGet()
         activeRequests.incrementAndGet()
 
         try {
-            val promptText = request.messages.joinToString("\n") { msg ->
-                msg.content
+            // OpenAI 형식 messages를 Ollama 형식으로 변환
+            val ollamaMessages = request.messages.map { msg ->
+                OllamaChatMessage(role = msg.role, content = msg.content)
             }
 
-            val ollamaRequest = OllamaRequest(
+            val ollamaRequest = OllamaChatRequest(
                 model = modelName,
-                prompt = promptText,
+                messages = ollamaMessages,
                 temperature = request.temperature
             )
 
             val startTime = System.currentTimeMillis()
 
-            // RestClient로 동기 호출 - Virtual Thread에서 병렬 처리
-            // Ollama는 NDJSON 형식으로 응답하므로 bytes로 받아서 처리
-            val responseBytes = restClient.post()
-                .uri("$ollamaUrl/api/generate")
+            // /api/chat 엔드포인트 사용 (role 지원)
+            val responseBytes = webClient.post()
+                .uri("$ollamaUrl/api/chat")
                 .header("Content-Type", "application/json")
-                .body(ollamaRequest)
+                .bodyValue(ollamaRequest)
                 .retrieve()
-                .body(ByteArray::class.java) ?: throw IllegalStateException("Ollama returned null response")
+                .bodyToMono(ByteArray::class.java)
+                .block() ?: throw IllegalStateException("Ollama returned null response")
 
             val responseText = String(responseBytes)
 
             // NDJSON 형식: 여러 줄의 JSON이 '\n'으로 구분됨
-            // 모든 줄의 response 필드를 합쳐서 완전한 응답 생성
             val lines = responseText.trim().lines().filter { it.isNotBlank() }
             val fullResponse = StringBuilder()
-            var lastResponse: OllamaResponse? = null
+            var lastResponse: OllamaChatResponse? = null
 
             for (line in lines) {
                 try {
-                    val partial = mapper.readValue(line, OllamaResponse::class.java)
-                    fullResponse.append(partial.response)
+                    val partial = mapper.readValue(line, OllamaChatResponse::class.java)
+                    fullResponse.append(partial.message.content)
                     lastResponse = partial
                 } catch (e: Exception) {
                     logger().warn("⚠️ Failed to parse Ollama response line: ${line.take(100)}")

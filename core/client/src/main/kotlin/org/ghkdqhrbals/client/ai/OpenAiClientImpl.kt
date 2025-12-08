@@ -16,8 +16,9 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.max
 
 class OpenAiClientImpl(
-    private val apiKey: String
+    private val apiKey: String,
 ) : LlmClient {
+    override val name: LlmClientType = LlmClientType.OPENAI
 
     private val httpClientConfig: HttpClientConfig<*>.() -> Unit = {
         install(createClientPlugin("RateLimitExtractor") {

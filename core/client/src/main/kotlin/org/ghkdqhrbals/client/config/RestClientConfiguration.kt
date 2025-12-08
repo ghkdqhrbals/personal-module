@@ -1,6 +1,8 @@
 package org.ghkdqhrbals.client.config
 
+import io.netty.handler.logging.LogLevel
 import org.ghkdqhrbals.client.config.interceptor.ApiCallInterceptor
+import org.ghkdqhrbals.client.config.interceptor.WebClientLoggingFilter
 import org.ghkdqhrbals.model.domain.Jackson
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.context.annotation.Bean
@@ -13,11 +15,14 @@ import org.springframework.http.converter.ByteArrayHttpMessageConverter
 import org.springframework.http.converter.StringHttpMessageConverter
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter
 import org.springframework.web.client.RestClient
-import org.springframework.web.reactive.function.client.WebClient
 import org.springframework.http.client.reactive.ReactorClientHttpConnector
+import org.springframework.stereotype.Component
+import org.springframework.web.reactive.function.client.*
+import reactor.core.publisher.Mono
 import reactor.netty.http.client.HttpClient
 import reactor.netty.resources.ConnectionProvider
 import reactor.netty.resources.LoopResources
+import reactor.netty.transport.logging.AdvancedByteBufFormat
 import java.nio.charset.StandardCharsets
 import java.time.Duration
 
@@ -28,6 +33,23 @@ class RestClientConfiguration(
     companion object {
         val customJacksonMessageConverter =
             MappingJackson2HttpMessageConverter().also { it.objectMapper = Jackson.getMapper() }
+    }
+    @Bean
+    fun webClient(
+        loggingFilter: WebClientLoggingFilter,
+    ): WebClient {
+
+        val httpClient = HttpClient.create()
+            .wiretap(
+                "reactor.netty.http.client",
+                LogLevel.INFO,
+                AdvancedByteBufFormat.TEXTUAL   // ★ 실제 전송되는 바디까지 출력
+            )
+
+        return WebClient.builder()
+            .clientConnector(ReactorClientHttpConnector(httpClient))
+            .filter(loggingFilter)  // response body 를 출력 및 복원
+            .build()
     }
 
     @Primary

@@ -96,6 +96,7 @@ dependencies {
     testImplementation("io.mockk:mockk:1.13.8")
     // jpa
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
+    implementation("org.springframework.boot:spring-boot-starter-webflux")
     implementation("com.mysql:mysql-connector-j")
     // Flyway for database migration
     implementation("org.flywaydb:flyway-core")
@@ -110,13 +111,16 @@ dependencies {
     implementation("io.ktor:ktor-client-logging:3.0.0")
     implementation("io.ktor:ktor-serialization-kotlinx-json:3.0.0")
     // Swagger UI (springdoc-openapi)
-    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.7.0")
+    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.0")
     // Atom/Feed parser for arXiv
     implementation("com.rometools:rome:2.1.0")
     // HTML sanitize
     implementation("org.jsoup:jsoup:1.17.2")
     implementation("org.springframework.boot:spring-boot-starter-data-redis")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
+    // Resilience4j Circuit Breaker
+    implementation("io.github.resilience4j:resilience4j-spring-boot3:2.2.0")
+    implementation("io.github.resilience4j:resilience4j-kotlin:2.2.0")
     // Apache HttpClient for RestClient connection pooling (version managed by Spring Boot BOM)
     implementation("org.apache.httpcomponents.client5:httpclient5")
     implementation("org.apache.httpcomponents.core5:httpcore5")

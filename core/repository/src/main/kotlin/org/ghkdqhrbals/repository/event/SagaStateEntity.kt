@@ -46,4 +46,8 @@ data class SagaStateEntity(
 
     @Version
     val version: Long = 0
-)
+) {
+    fun isCompleted(): Boolean {
+        return status == SagaStatus.COMPLETED || status == SagaStatus.COMPENSATION_COMPLETED
+    }
+}

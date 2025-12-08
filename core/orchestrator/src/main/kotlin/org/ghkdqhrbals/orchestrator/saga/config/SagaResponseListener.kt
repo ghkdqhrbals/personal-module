@@ -7,6 +7,7 @@ import org.ghkdqhrbals.model.event.SagaResponseEvent
 import org.ghkdqhrbals.model.event.SagaStatus
 import org.ghkdqhrbals.model.event.parser.EventParser
 import org.ghkdqhrbals.orchestrator.saga.orchestrator.SagaOrchestrator
+import org.ghkdqhrbals.orchestrator.saga.service.SagaEventStreamService
 import org.ghkdqhrbals.message.service.EventStoreService
 
 import org.slf4j.LoggerFactory
@@ -17,13 +18,14 @@ import org.springframework.stereotype.Component
 import java.util.*
 
 /**
- * 단일 응답 토픽에서 모든 Saga 응답을 ��리하는 리스너
+ * 단일 응답 토픽에서 모든 Saga 응답을 처리하는 리스너
  */
 @Component
 class SagaResponseListener(
     private val eventParser: EventParser,
     private val sagaOrchestrator: SagaOrchestrator,
     private val eventStoreService: EventStoreService,
+    private val sagaEventStreamService: SagaEventStreamService,
     private val objectMapper: ObjectMapper
 ) {
     private val log = LoggerFactory.getLogger(SagaResponseListener::class.java)
@@ -56,9 +58,13 @@ class SagaResponseListener(
             when (sagaState.status) {
                 SagaStatus.IN_PROGRESS, SagaStatus.STARTED -> {
                     sagaOrchestrator.handleResponse(response)
+                    // SSE 클라이언트에게 이벤트 전파
+                    publishEventToSSE(response)
                 }
                 SagaStatus.COMPENSATING -> {
                     sagaOrchestrator.handleCompensationResponse(response)
+                    // SSE 클라이언트에게 이벤트 전파
+                    publishEventToSSE(response)
                 }
                 else -> {
                     log.warn("Received response for saga in unexpected state: sagaId={}, status={}",
@@ -67,6 +73,34 @@ class SagaResponseListener(
             }
         } catch (e: Exception) {
             log.error("Failed to process saga response: {}", message, e)
+        }
+    }
+
+    /**
+     * SSE 클라이언트에게 이벤트 발행
+     */
+    private fun publishEventToSSE(response: SagaResponseEvent) {
+        try {
+            val sagaState = eventStoreService.getSagaState(response.sagaId) ?: return
+
+            val eventData = mapOf(
+                "eventId" to response.eventId,
+                "sagaId" to response.sagaId,
+                "eventType" to response.eventType.name,
+                "stepName" to response.stepName,
+                "stepIndex" to response.stepIndex,
+                "status" to sagaState.status.name,
+                "success" to response.success,
+                "errorMessage" to response.errorMessage,
+                "currentStepIndex" to sagaState.currentStepIndex,
+                "totalSteps" to sagaState.totalSteps,
+                "timestamp" to System.currentTimeMillis()
+            )
+
+            sagaEventStreamService.publishEvent(response.sagaId, eventData)
+            log.debug("Published SSE event for sagaId: {}", response.sagaId)
+        } catch (e: Exception) {
+            log.error("Failed to publish SSE event for sagaId: {}", response.sagaId, e)
         }
     }
 

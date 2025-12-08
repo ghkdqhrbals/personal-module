@@ -1,6 +1,8 @@
 package org.ghkdqhrbals.message.service
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import org.ghkdqhrbals.message.dto.EventDto
+import org.ghkdqhrbals.message.dto.SagaEventSourcingDto
 import org.ghkdqhrbals.repository.event.EventStoreEntity
 import org.ghkdqhrbals.repository.event.EventStoreRepository
 import org.ghkdqhrbals.repository.event.SagaStateEntity
@@ -12,7 +14,6 @@ import org.ghkdqhrbals.model.event.SagaStatus
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
-import java.time.Instant
 import java.time.OffsetDateTime
 
 /**
@@ -72,6 +73,48 @@ class EventStoreService(
     @Transactional(readOnly = true)
     fun getEventsBySagaId(sagaId: String): List<EventStoreEntity> {
         return eventStoreRepository.findBySagaIdOrderBySequenceNumberAsc(sagaId)
+    }
+
+    /**
+     * Saga의 전체 이벤트 소싱 데이터 조회 (이벤트 + 최종 상태)
+     */
+    @Transactional(readOnly = true)
+    fun getSagaEventSourcing(sagaId: String): SagaEventSourcingDto? {
+        val state = getSagaState(sagaId) ?: return null
+        val events = getEventsBySagaId(sagaId)
+
+        return SagaEventSourcingDto(
+            sagaId = state.sagaId,
+            sagaType = state.sagaType,
+            currentStatus = state.status,
+            currentStepIndex = state.currentStepIndex,
+            totalSteps = state.totalSteps,
+            events = events.map { event ->
+                EventDto(
+                    eventId = event.eventId,
+                    sequenceNumber = event.sequenceNumber,
+                    eventType = event.eventType,
+                    timestamp = event.timestamp,
+                    stepName = event.stepName,
+                    stepIndex = event.stepIndex,
+                    success = event.success,
+                    errorMessage = event.errorMessage,
+                    payload = parseSagaData(event.payload)
+                )
+            },
+            createdAt = state.createdAt,
+            updatedAt = state.updatedAt
+        )
+    }
+
+    /**
+     * 여러 Saga의 이벤트 소싱 데이터를 한번에 조회
+     */
+    @Transactional(readOnly = true)
+    fun getSagaEventSourcingBatch(sagaIds: List<String>): Map<String, SagaEventSourcingDto?> {
+        return sagaIds.associateWith { sagaId ->
+            getSagaEventSourcing(sagaId)
+        }
     }
 
     /**

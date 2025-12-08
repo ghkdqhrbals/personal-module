@@ -78,6 +78,36 @@ springdoc:
   default-consumes-media-type: application/json
   model-and-view-allowed: true
 
+# Actuator 설정 (Circuit Breaker 모니터링)
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,circuitbreakers,circuitbreakerevents
+  endpoint:
+    health:
+      show-details: always
+  health:
+    circuitbreakers:
+      enabled: true
+
+# Resilience4j Circuit Breaker 설정 (코드에서 직접 설정하므로 참조용)
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        registerHealthIndicator: true
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        failureRateThreshold: 50
+        slowCallRateThreshold: 80
+        slowCallDurationThreshold: 30s
+        waitDurationInOpenState: 30s
+        permittedNumberOfCallsInHalfOpenState: 3
+    instances:
+      ollama:
+        baseConfig: default
+
 oauth:
   enable-providers: true
   providers:
