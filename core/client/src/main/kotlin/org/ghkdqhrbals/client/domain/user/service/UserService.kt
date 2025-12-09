@@ -1,7 +1,7 @@
 package org.ghkdqhrbals.client.domain.user.service
 
-import org.ghkdqhrbals.repository.user.UserEntity
-import org.ghkdqhrbals.repository.user.UserRepository
+import org.ghkdqhrbals.infra.user.UserEntity
+import org.ghkdqhrbals.infra.user.UserRepository
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 

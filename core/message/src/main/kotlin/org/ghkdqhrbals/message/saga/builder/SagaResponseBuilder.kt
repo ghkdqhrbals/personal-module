@@ -3,6 +3,7 @@ package org.ghkdqhrbals.message.saga.builder
 import org.ghkdqhrbals.model.event.SagaResponse
 import org.ghkdqhrbals.model.event.SagaEventType
 import java.time.Instant
+import java.time.OffsetDateTime
 import java.util.UUID
 
 /**
@@ -24,7 +25,7 @@ object SagaResponseBuilder {
             eventId = UUID.randomUUID().toString(),
             sagaId = sagaId,
             eventType = SagaEventType.STEP_RESPONSE,
-            timestamp = Instant.now(),
+            timestamp = OffsetDateTime.now(),
             stepName = stepName,
             stepIndex = stepIndex,
             sourceService = sourceService,
@@ -49,7 +50,7 @@ object SagaResponseBuilder {
             eventId = UUID.randomUUID().toString(),
             sagaId = sagaId,
             eventType = SagaEventType.STEP_RESPONSE,
-            timestamp = Instant.now(),
+            timestamp = OffsetDateTime.now(),
             stepName = stepName,
             stepIndex = stepIndex,
             sourceService = sourceService,
@@ -73,7 +74,7 @@ object SagaResponseBuilder {
             eventId = UUID.randomUUID().toString(),
             sagaId = sagaId,
             eventType = SagaEventType.SAGA_COMPENSATION_COMPLETED,
-            timestamp = Instant.now(),
+            timestamp = OffsetDateTime.now(),
             stepName = stepName,
             stepIndex = stepIndex,
             sourceService = sourceService,
@@ -98,7 +99,7 @@ object SagaResponseBuilder {
             eventId = UUID.randomUUID().toString(),
             sagaId = sagaId,
             eventType = SagaEventType.STEP_RESPONSE,
-            timestamp = Instant.now(),
+            timestamp = OffsetDateTime.now(),
             stepName = stepName,
             stepIndex = stepIndex,
             sourceService = sourceService,

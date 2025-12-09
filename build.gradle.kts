@@ -1,4 +1,7 @@
+import org.gradle.api.tasks.testing.logging.TestExceptionFormat
+import org.gradle.api.tasks.testing.logging.TestLogEvent
 import org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension
+import org.springframework.boot.gradle.plugin.SpringBootPlugin
 
 plugins {
     kotlin("jvm") version "1.9.25" apply false
@@ -8,6 +11,7 @@ plugins {
     id("io.spring.dependency-management") version "1.1.7" apply false
     id("com.google.protobuf") version "0.9.2" apply false
 }
+
 
 allprojects {
     repositories { mavenCentral() }
@@ -37,10 +41,3 @@ tasks.register("classes") {
     description = "Assembles main classes for all subprojects"
     dependsOn(subprojects.map { "${it.path}:classes" })
 }
-
-// 필요 시 루트에서 ':testClasses'도 실행할 수 있게 하시려면 아래 주석을 해제하세요.
-// tasks.register("testClasses") {
-//     group = "build"
-//     description = "Assembles test classes for all subprojects"
-//     dependsOn(subprojects.map { "${it.path}:testClasses" })
-// }

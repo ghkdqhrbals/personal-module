@@ -3,7 +3,7 @@ package org.ghkdqhrbals.client.config
 import io.netty.handler.logging.LogLevel
 import org.ghkdqhrbals.client.config.interceptor.ApiCallInterceptor
 import org.ghkdqhrbals.client.config.interceptor.WebClientLoggingFilter
-import org.ghkdqhrbals.model.domain.Jackson
+import org.ghkdqhrbals.model.config.Jackson
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -16,9 +16,7 @@ import org.springframework.http.converter.StringHttpMessageConverter
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter
 import org.springframework.web.client.RestClient
 import org.springframework.http.client.reactive.ReactorClientHttpConnector
-import org.springframework.stereotype.Component
 import org.springframework.web.reactive.function.client.*
-import reactor.core.publisher.Mono
 import reactor.netty.http.client.HttpClient
 import reactor.netty.resources.ConnectionProvider
 import reactor.netty.resources.LoopResources

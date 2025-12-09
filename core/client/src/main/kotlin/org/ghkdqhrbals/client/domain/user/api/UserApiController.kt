@@ -1,6 +1,6 @@
 package org.ghkdqhrbals.client.domain.user.api
 
-import org.ghkdqhrbals.repository.user.UserEntity
+import org.ghkdqhrbals.infra.user.UserEntity
 import org.ghkdqhrbals.client.domain.user.service.UserService
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*

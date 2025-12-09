@@ -1,12 +1,12 @@
 package org.ghkdqhrbals.message.service
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import org.ghkdqhrbals.message.dto.EventDto
-import org.ghkdqhrbals.message.dto.SagaEventSourcingDto
-import org.ghkdqhrbals.repository.event.EventStoreEntity
-import org.ghkdqhrbals.repository.event.EventStoreRepository
-import org.ghkdqhrbals.repository.event.SagaStateEntity
-import org.ghkdqhrbals.repository.event.SagaStateRepository
+import org.ghkdqhrbals.model.event.Event
+import org.ghkdqhrbals.model.event.EventHistory
+import org.ghkdqhrbals.infra.event.EventStoreEntity
+import org.ghkdqhrbals.infra.event.EventStoreRepository
+import org.ghkdqhrbals.infra.event.SagaStateEntity
+import org.ghkdqhrbals.infra.event.SagaStateRepository
 import org.ghkdqhrbals.model.event.SagaCommandEvent
 import org.ghkdqhrbals.model.event.SagaEvent
 import org.ghkdqhrbals.model.event.SagaResponseEvent
@@ -79,18 +79,18 @@ class EventStoreService(
      * Saga의 전체 이벤트 소싱 데이터 조회 (이벤트 + 최종 상태)
      */
     @Transactional(readOnly = true)
-    fun getSagaEventSourcing(sagaId: String): SagaEventSourcingDto? {
+    fun getSagaEventSourcing(sagaId: String): EventHistory? {
         val state = getSagaState(sagaId) ?: return null
         val events = getEventsBySagaId(sagaId)
 
-        return SagaEventSourcingDto(
+        return EventHistory(
             sagaId = state.sagaId,
             sagaType = state.sagaType,
             currentStatus = state.status,
             currentStepIndex = state.currentStepIndex,
             totalSteps = state.totalSteps,
             events = events.map { event ->
-                EventDto(
+                Event(
                     eventId = event.eventId,
                     sequenceNumber = event.sequenceNumber,
                     eventType = event.eventType,
@@ -111,7 +111,7 @@ class EventStoreService(
      * 여러 Saga의 이벤트 소싱 데이터를 한번에 조회
      */
     @Transactional(readOnly = true)
-    fun getSagaEventSourcingBatch(sagaIds: List<String>): Map<String, SagaEventSourcingDto?> {
+    fun getSagaEventSourcingBatch(sagaIds: List<String>): Map<String, EventHistory?> {
         return sagaIds.associateWith { sagaId ->
             getSagaEventSourcing(sagaId)
         }

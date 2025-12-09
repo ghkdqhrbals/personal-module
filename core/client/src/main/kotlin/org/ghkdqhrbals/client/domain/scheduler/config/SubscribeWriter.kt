@@ -1,7 +1,7 @@
 package org.ghkdqhrbals.client.domain.scheduler.config
 
-import org.ghkdqhrbals.repository.subscribe.Subscribe
-import org.ghkdqhrbals.repository.subscribe.SubscribeRepository
+import org.ghkdqhrbals.infra.subscribe.Subscribe
+import org.ghkdqhrbals.infra.subscribe.SubscribeRepository
 import org.springframework.batch.item.Chunk
 import org.springframework.batch.item.ItemWriter
 import org.springframework.stereotype.Component

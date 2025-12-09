@@ -2,8 +2,9 @@ package org.ghkdqhrbals.client.domain.paper.service
 
 import org.ghkdqhrbals.client.config.log.logger
 import org.ghkdqhrbals.client.controller.paper.dto.*
-import org.ghkdqhrbals.repository.paper.PaperEntity
-import org.ghkdqhrbals.repository.paper.PaperRepository
+import org.ghkdqhrbals.infra.paper.PaperEntity
+import org.ghkdqhrbals.infra.paper.PaperRepository
+import org.ghkdqhrbals.model.paper.PaperModel
 import org.ghkdqhrbals.model.paper.PaperSearchAndStoreEvent
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.stereotype.Service
@@ -31,8 +32,8 @@ class ArxivService(
      * 신규 논문 발견 시 저장하고 SummaryEvent 반환
      */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    fun analyze(event: PaperSearchAndStoreEvent): Map<ArxivPaper, PaperEntity?>? {
-        val returnMaps = mutableMapOf<ArxivPaper, PaperEntity?>()
+    fun analyze(event: PaperSearchAndStoreEvent): Map<ArxivPaper, PaperModel?>? {
+        val returnMaps = mutableMapOf<ArxivPaper, PaperModel?>()
 
         val response = arxivHttpClient.search(event)
 
@@ -61,7 +62,7 @@ class ArxivService(
 
         logger().info("📄 신규 논문 ${newPapers.size}건 발견. totalResponse=${incomingIds.size}")
 
-        val saves = paperRepository.saveAll(newPapers.keys.map { it.toPaperEntity() })
+        val saves = paperRepository.saveAll(newPapers.keys.map { it.toPaperModel() })
 
         returnMaps.replaceAll { k, v -> v ?: saves.firstOrNull { it.arxivId == k.arxivId } }
         return returnMaps
@@ -154,19 +155,19 @@ class ArxivService(
 
         // 논문 목록 조회 (최근 100개로 임시)
         val papers = if (total > 0) {
-            paperRepository.findTop100ByOrderBySearchDateDesc().map { entity ->
+            paperRepository.findTop100ByOrderBySearchDateDesc().map { model ->
                 Paper(
-                    title = entity.title,
-                    authors = entity.author?.split(",")?.map { it.trim() } ?: emptyList(),
-                    journal = entity.journal,
-                    publicationDate = entity.publishedAt?.toString(),
+                    title = model.title,
+                    authors = model.authors,
+                    journal = model.journalRefRaw,
+                    publicationDate = model.publishedAt.toString(),
                     doi = null,
                     abstract = null,
-                    url = entity.url,
+                    url = model.url,
                     citations = null,
-                    impactFactor = entity.impactFactor,
-                    summary = entity.summary,
-                    novelty = entity.novelty
+                    impactFactor = model.impactFactor,
+                    summary = model.summary,
+                    novelty = model.novelty,
                 )
             }
         } else {
@@ -197,6 +198,4 @@ class ArxivService(
             papers = papers
         )
     }
-
-
 }

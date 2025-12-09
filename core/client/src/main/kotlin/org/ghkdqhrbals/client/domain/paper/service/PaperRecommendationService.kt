@@ -1,18 +1,18 @@
 package org.ghkdqhrbals.client.domain.paper.service
 
-import org.ghkdqhrbals.repository.paper.PaperEntity
-import org.ghkdqhrbals.repository.paper.PaperSubscribe
-import org.ghkdqhrbals.repository.paper.PaperRepository
-import org.ghkdqhrbals.repository.paper.PaperSubscribeRepository
-import org.ghkdqhrbals.repository.subscribe.Subscribe
-import org.ghkdqhrbals.repository.subscribe.SubscribeRepository
+import org.ghkdqhrbals.infra.paper.PaperEntity
+import org.ghkdqhrbals.infra.paper.PaperSubscribe
+import org.ghkdqhrbals.infra.paper.PaperJdbcRepository
+import org.ghkdqhrbals.infra.paper.PaperSubscribeRepository
+import org.ghkdqhrbals.infra.subscribe.Subscribe
+import org.ghkdqhrbals.infra.subscribe.SubscribeRepository
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
 @Service
 @Transactional
 class PaperRecommendationService(
-    private val paperRepository: PaperRepository,
+    private val paperJdbcRepository: PaperJdbcRepository,
     private val paperSubscribeRepository: PaperSubscribeRepository,
     private val subscribeRepository: SubscribeRepository
 ) {
@@ -22,7 +22,7 @@ class PaperRecommendationService(
      * AI 분석 결과를 바탕으로 관련도 점수를 계산하여 저장
      */
     fun matchPaperWithSubscribes(paperId: Long, subscribeIds: List<Long>, matchScores: Map<Long, Double>? = null) {
-        val paper = paperRepository.findById(paperId)
+        val paper = paperJdbcRepository.findById(paperId)
             .orElseThrow { IllegalArgumentException("논문을 찾을 수 없습니다. ID: $paperId") }
 
         subscribeIds.forEach { subscribeId ->
@@ -115,7 +115,7 @@ class PaperRecommendationService(
     fun autoMatchPaperWithAllSubscribes(paperId: Long) {
         val activeSubscribes = subscribeRepository.findAllByActivatedIsTrue()
 
-        val paper = paperRepository.findById(paperId)
+        val paper = paperJdbcRepository.findById(paperId)
             .orElseThrow { IllegalArgumentException("논문을 찾을 수 없습니다. ID: $paperId") }
 
         activeSubscribes.forEach { subscribe ->

@@ -12,7 +12,8 @@ include(
     ":orchestrator",
     ":api",
     ":model",
-    ":repository",
+    ":infra",
+    ":schema"
 )
 
 project(":client").projectDir = file("core/client")
@@ -20,4 +21,5 @@ project(":api").projectDir = file("core/api")
 project(":orchestrator").projectDir = file("core/orchestrator")
 project(":message").projectDir = file("core/message")
 project(":model").projectDir = file("core/model")
-project(":repository").projectDir = file("core/repository")
+project(":infra").projectDir = file("core/infra")
+project(":schema").projectDir = file("core/schema")

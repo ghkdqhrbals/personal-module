@@ -2,7 +2,7 @@ package org.ghkdqhrbals.client.ai
 
 import org.ghkdqhrbals.client.config.log.logger
 import org.ghkdqhrbals.client.controller.paper.dto.PaperAnalysisResponse
-import org.ghkdqhrbals.model.domain.Jackson
+import org.ghkdqhrbals.model.config.Jackson
 
 interface LlmClient {
     val name: LlmClientType

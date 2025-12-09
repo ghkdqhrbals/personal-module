@@ -1,9 +1,9 @@
 package org.ghkdqhrbals.client.config
 
 import org.ghkdqhrbals.client.config.log.setting
-import org.ghkdqhrbals.repository.subscribe.Subscribe
-import org.ghkdqhrbals.repository.subscribe.SubscribeType
-import org.ghkdqhrbals.repository.subscribe.SubscribeRepository
+import org.ghkdqhrbals.infra.subscribe.Subscribe
+import org.ghkdqhrbals.infra.subscribe.SubscribeType
+import org.ghkdqhrbals.infra.subscribe.SubscribeRepository
 import org.slf4j.LoggerFactory
 import org.springframework.boot.CommandLineRunner
 import org.springframework.context.annotation.Bean

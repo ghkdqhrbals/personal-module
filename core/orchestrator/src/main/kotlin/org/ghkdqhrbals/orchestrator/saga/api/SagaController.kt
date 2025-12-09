@@ -12,8 +12,8 @@ import org.ghkdqhrbals.message.saga.definition.SagaType
 import org.ghkdqhrbals.orchestrator.saga.orchestrator.SagaOrchestrator
 import org.ghkdqhrbals.orchestrator.saga.service.SagaEventStreamService
 import org.ghkdqhrbals.message.service.EventStoreService
-import org.ghkdqhrbals.repository.event.SagaStateEntity
-import org.ghkdqhrbals.repository.event.EventStoreEntity
+import org.ghkdqhrbals.infra.event.SagaStateEntity
+import org.ghkdqhrbals.infra.event.EventStoreEntity
 import org.springframework.http.ResponseEntity
 import org.springframework.http.MediaType
 import org.springframework.web.bind.annotation.*

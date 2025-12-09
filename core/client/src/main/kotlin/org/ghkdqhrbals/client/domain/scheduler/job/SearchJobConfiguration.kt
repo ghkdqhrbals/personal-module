@@ -7,8 +7,8 @@ import org.ghkdqhrbals.client.domain.paper.service.ArxivService
 import org.ghkdqhrbals.client.domain.scheduler.config.NowJobTimeStamper
 import org.ghkdqhrbals.client.domain.scheduler.config.SubscribeReader
 import org.ghkdqhrbals.client.domain.scheduler.config.SubscribeStepSummaryListener
-import org.ghkdqhrbals.repository.subscribe.Subscribe
-import org.ghkdqhrbals.repository.subscribe.SubscribeRepository
+import org.ghkdqhrbals.infra.subscribe.Subscribe
+import org.ghkdqhrbals.infra.subscribe.SubscribeRepository
 import org.springframework.batch.core.Job
 import org.springframework.batch.core.Step
 import org.springframework.batch.core.job.builder.JobBuilder

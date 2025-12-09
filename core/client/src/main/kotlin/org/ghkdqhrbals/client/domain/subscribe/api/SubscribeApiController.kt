@@ -1,9 +1,9 @@
 package org.ghkdqhrbals.client.domain.subscribe.api
 
-import org.ghkdqhrbals.repository.subscribe.SubscribeType
-import org.ghkdqhrbals.repository.subscribe.UserSubscribe
+import org.ghkdqhrbals.infra.subscribe.SubscribeType
+import org.ghkdqhrbals.infra.subscribe.UserSubscribe
 import org.ghkdqhrbals.client.domain.subscribe.service.SubscribeService
-import org.ghkdqhrbals.repository.subscribe.Subscribe
+import org.ghkdqhrbals.infra.subscribe.Subscribe
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 

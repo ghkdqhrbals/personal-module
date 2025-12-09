@@ -1,6 +1,7 @@
 package org.ghkdqhrbals.model.event
 
-import java.time.Instant
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
 import java.util.*
 
 /**
@@ -10,7 +11,7 @@ data class SagaCommand(
     val eventId: String = UUID.randomUUID().toString(),
     val sagaId: String,
     val eventType: SagaEventType,
-    val timestamp: Instant = Instant.now(),
+    val timestamp: OffsetDateTime = OffsetDateTime.now(ZoneOffset.UTC),
     val stepName: String,
     val stepIndex: Int,
     val commandTopic: String,

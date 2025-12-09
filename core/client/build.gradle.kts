@@ -74,7 +74,7 @@ dependencies {
     implementation(project(":message"))
     implementation(project(":model"))
     implementation(project(":oauth"))
-    implementation(project(":repository"))
+    implementation(project(":infra"))
     kapt(project(":model"))
     kapt(project(":message"))
     kapt("org.springframework.boot:spring-boot-configuration-processor")

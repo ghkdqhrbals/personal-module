@@ -36,7 +36,7 @@ dependencies {
 	implementation("com.fasterxml.jackson.datatype:jackson-datatype-jsr310")
 	kapt("org.springframework.boot:spring-boot-configuration-processor")
 	implementation(project(":message"))
-	implementation(project(":repository"))
+	implementation(project(":infra"))
 
 	// Swagger/OpenAPI
 	implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.0")

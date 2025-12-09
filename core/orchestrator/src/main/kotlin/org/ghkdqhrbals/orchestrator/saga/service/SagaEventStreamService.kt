@@ -118,7 +118,7 @@ class SagaEventStreamService(
                                 "stepIndex" to event.stepIndex,
                                 "success" to event.success,
                                 "errorMessage" to event.errorMessage,
-                                "timestamp" to event.timestamp.toEpochMilli(),
+                                "timestamp" to event.timestamp.toInstant().toEpochMilli(),
                                 "payload" to event.payload
                             ))
                     )
@@ -200,7 +200,7 @@ class SagaEventStreamService(
             // 실패한 emitter 제거
             deadEmitters.forEach { complete(sagaId, it) }
 
-            // Saga 완료 상태 확인 �� 모든 emitter 종료
+            // Saga 완료 상태 확인 모든 emitter 종료
             try {
                 val eventMap = objectMapper.readValue(eventData, Map::class.java) as Map<*, *>
                 val eventType = eventMap["eventType"] as? String
@@ -284,7 +284,7 @@ class SagaEventStreamService(
                     "stepIndex" to latestEvent.stepIndex,
                     "success" to latestEvent.success,
                     "errorMessage" to latestEvent.errorMessage,
-                    "timestamp" to latestEvent.timestamp.toEpochMilli(),
+                    "timestamp" to latestEvent.timestamp.toInstant().toEpochMilli(),
                     "payload" to objectMapper.readValue(latestEvent.payload, Map::class.java)
                 )
 

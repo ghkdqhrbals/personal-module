@@ -1,9 +1,9 @@
 package org.ghkdqhrbals.client.domain.user.service
 
-import org.ghkdqhrbals.repository.user.OauthProvider
-import org.ghkdqhrbals.repository.user.UserEntity
-import org.ghkdqhrbals.repository.user.OauthProviderRepository
-import org.ghkdqhrbals.repository.user.UserRepository
+import org.ghkdqhrbals.infra.user.OauthProvider
+import org.ghkdqhrbals.infra.user.UserEntity
+import org.ghkdqhrbals.infra.user.OauthProviderRepository
+import org.ghkdqhrbals.infra.user.UserRepository
 import org.ghkdqhrbals.oauth.service.OAuthClientFactory
 import org.ghkdqhrbals.oauth.service.OAuthService
 import org.ghkdqhrbals.oauth.service.OauthProviderKind

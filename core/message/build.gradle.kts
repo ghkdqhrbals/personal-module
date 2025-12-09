@@ -37,7 +37,7 @@ dependencies {
 
     // Model module
     api(project(":model"))
-    api(project(":repository"))
+    api(project(":infra"))
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.kafka:spring-kafka-test")

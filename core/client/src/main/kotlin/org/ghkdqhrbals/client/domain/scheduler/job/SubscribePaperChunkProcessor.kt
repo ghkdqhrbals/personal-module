@@ -3,13 +3,13 @@ package org.ghkdqhrbals.client.domain.scheduler.job
 import kotlinx.coroutines.runBlocking
 import org.ghkdqhrbals.client.ai.LlmClient
 import org.ghkdqhrbals.client.common.LockTimeoutException
-import org.ghkdqhrbals.repository.paper.PaperRepository
+import org.ghkdqhrbals.infra.paper.PaperJdbcRepository
 import org.ghkdqhrbals.client.domain.paper.service.ArxivApiException
 import org.ghkdqhrbals.client.domain.paper.service.ArxivHttpClient
 import org.ghkdqhrbals.client.domain.paper.service.ArxivService
-import org.ghkdqhrbals.repository.subscribe.Subscribe
+import org.ghkdqhrbals.infra.subscribe.Subscribe
 import org.ghkdqhrbals.model.paper.PaperSearchAndStoreEvent
-import org.ghkdqhrbals.repository.subscribe.SubscribeType
+import org.ghkdqhrbals.infra.subscribe.SubscribeType
 import org.slf4j.LoggerFactory
 import org.springframework.data.domain.PageRequest
 import org.springframework.stereotype.Component
@@ -24,7 +24,7 @@ class SubscribePaperChunkProcessor(
     private val arxivService: ArxivService,
     private val httpClient: ArxivHttpClient,
     private val llmClient: LlmClient,
-    private val paperRepository: PaperRepository,
+    private val paperJdbcRepository: PaperJdbcRepository,
 ) {
     private val logger = LoggerFactory.getLogger(SubscribePaperChunkProcessor::class.java)
 
@@ -175,7 +175,7 @@ class SubscribePaperChunkProcessor(
                 )
 
                 // 이걸로 paperRepository 업데이트.
-                val paper = paperRepository.findByArxivId(event.arxivId!!)
+                val paper = paperJdbcRepository.findByArxivId(event.arxivId!!)
                 val updated = paper!!.copy(
                     summary = analysis.coreContribution,
                     novelty = analysis.noveltyAgainstPreviousWorks,
@@ -183,7 +183,7 @@ class SubscribePaperChunkProcessor(
                     journal = analysis.journalName ?: paper.journal,
                     impactFactor = analysis.impactFactor ?: paper.impactFactor
                 )
-                paperRepository.save(updated)
+                paperJdbcRepository.save(updated)
             }
 
         }

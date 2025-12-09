@@ -1,11 +1,11 @@
 package org.ghkdqhrbals.client.domain.subscribe.service
 
-import org.ghkdqhrbals.repository.subscribe.Subscribe
-import org.ghkdqhrbals.repository.subscribe.SubscribeType
-import org.ghkdqhrbals.repository.subscribe.UserSubscribe
-import org.ghkdqhrbals.repository.subscribe.SubscribeRepository
-import org.ghkdqhrbals.repository.subscribe.UserSubscribeRepository
-import org.ghkdqhrbals.repository.user.UserRepository
+import org.ghkdqhrbals.infra.subscribe.Subscribe
+import org.ghkdqhrbals.infra.subscribe.SubscribeType
+import org.ghkdqhrbals.infra.subscribe.UserSubscribe
+import org.ghkdqhrbals.infra.subscribe.SubscribeRepository
+import org.ghkdqhrbals.infra.subscribe.UserSubscribeRepository
+import org.ghkdqhrbals.infra.user.UserRepository
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 

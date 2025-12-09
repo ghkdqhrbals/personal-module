@@ -9,7 +9,6 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories
  * META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports에 등록되어 자동으로 로드됨
  */
 @Configuration
-@EntityScan("org.ghkdqhrbals.message.repository")
-@EnableJpaRepositories("org.ghkdqhrbals.message.repository")
+@EnableJpaRepositories
 class MessageModuleConfiguration
 

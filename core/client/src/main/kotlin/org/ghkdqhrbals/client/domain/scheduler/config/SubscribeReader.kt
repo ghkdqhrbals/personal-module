@@ -4,8 +4,8 @@ import org.ghkdqhrbals.client.config.log.logger
 import org.springframework.batch.item.ItemReader
 import org.springframework.data.domain.PageRequest
 import org.springframework.data.domain.Sort
-import org.ghkdqhrbals.repository.subscribe.Subscribe
-import org.ghkdqhrbals.repository.subscribe.SubscribeRepository
+import org.ghkdqhrbals.infra.subscribe.Subscribe
+import org.ghkdqhrbals.infra.subscribe.SubscribeRepository
 
 class SubscribeReader(
     private val repo: SubscribeRepository,

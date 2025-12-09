@@ -6,8 +6,7 @@ import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonInclude.Include
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker
 import org.ghkdqhrbals.client.config.log.setting
-import org.ghkdqhrbals.model.domain.Jackson
-import org.springframework.stereotype.Component
+import org.ghkdqhrbals.model.config.Jackson
 import org.springframework.web.reactive.function.client.WebClient
 
 /**

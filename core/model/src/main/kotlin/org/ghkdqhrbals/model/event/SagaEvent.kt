@@ -1,6 +1,7 @@
 package org.ghkdqhrbals.model.event
 
-import java.time.Instant
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
 import java.util.UUID
 
 /**
@@ -10,7 +11,7 @@ interface SagaEvent {
     val eventId: String
     val sagaId: String
     val eventType: SagaEventType
-    val timestamp: Instant
+    val timestamp: OffsetDateTime
     val payload: Map<String, Any>
 }
 
@@ -21,7 +22,7 @@ data class BaseSagaEvent(
     override val eventId: String = UUID.randomUUID().toString(),
     override val sagaId: String,
     override val eventType: SagaEventType,
-    override val timestamp: Instant = Instant.now(),
+    override val timestamp: OffsetDateTime = OffsetDateTime.now(ZoneOffset.UTC),
     override val payload: Map<String, Any> = emptyMap()
 ) : SagaEvent
 
@@ -32,7 +33,7 @@ data class SagaCommandEvent(
     override val eventId: String = UUID.randomUUID().toString(),
     override val sagaId: String,
     override val eventType: SagaEventType,
-    override val timestamp: Instant = Instant.now(),
+    override val timestamp: OffsetDateTime = OffsetDateTime.now(ZoneOffset.UTC),
     override val payload: Map<String, Any> = emptyMap(),
     val stepName: String,
     val stepIndex: Int,
@@ -47,7 +48,7 @@ data class SagaResponseEvent(
     override val eventId: String = UUID.randomUUID().toString(),
     override val sagaId: String,
     override val eventType: SagaEventType,
-    override val timestamp: Instant = Instant.now(),
+    override val timestamp: OffsetDateTime = OffsetDateTime.now(ZoneOffset.UTC),
     override val payload: Map<String, Any> = emptyMap(),
     val stepName: String,
     val stepIndex: Int,

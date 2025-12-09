@@ -1,6 +1,6 @@
 package org.ghkdqhrbals.client.controller.paper
 
-import org.ghkdqhrbals.repository.paper.PaperSubscribe
+import org.ghkdqhrbals.infra.paper.PaperSubscribe
 import org.ghkdqhrbals.client.domain.paper.service.PaperRecommendationService
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
