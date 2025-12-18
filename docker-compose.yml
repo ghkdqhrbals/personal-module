@@ -23,7 +23,14 @@ services:
 #      timeout: 10s
 #      retries: 3
 #      start_period: 90s
-
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
   redis:
     image: redis:7-alpine
     container_name: redis
@@ -38,7 +45,21 @@ services:
       interval: 10s
       timeout: 3s
       retries: 3
-
+  redis-exporter:
+    image: oliver006/redis_exporter:latest
+    container_name: redis_exporter
+    restart: unless-stopped
+    ports:
+      - "9121:9121"
+    environment:
+      - REDIS_ADDR=redis://redis:6379
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
   db:
     image: arm64v8/mysql:8.0.32
     container_name: mysql
@@ -68,4 +89,6 @@ volumes:
   ollama_data:
     driver: local
   redis_data:
+    driver: local
+  grafana_data:
     driver: local

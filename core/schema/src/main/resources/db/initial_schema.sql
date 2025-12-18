@@ -2,7 +2,6 @@ create table if not exists event_store
 (
     created_at   datetime(6)  not null,
     timestamp    datetime(6)  not null,
-    version      bigint       not null,
     event_id     varchar(36)  not null
         primary key,
     aggregate_id varchar(100) not null,
@@ -50,8 +49,7 @@ create table if not exists saga_event_store
     step_name       varchar(100) null,
     step_index      int          null,
     success         bit          not null,
-    error_message   text         null,
-    version         bigint       not null
+    error_message   text         null
 );
 
 create index idx_event_type
@@ -77,7 +75,6 @@ create table if not exists saga_state
     saga_data          text         null,
     created_at         timestamp(6) not null,
     updated_at         timestamp(6) not null,
-    version            bigint       not null
 );
 
 create index idx_saga_state_status

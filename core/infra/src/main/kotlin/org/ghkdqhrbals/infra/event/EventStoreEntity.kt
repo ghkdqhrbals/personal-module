@@ -20,7 +20,7 @@ import java.time.OffsetDateTime
 data class EventStoreEntity(
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    val id: Long = 0,
+    val id: Long? = null,
 
     @Column(nullable = false, length = 36)
     val eventId: String,
@@ -53,6 +53,4 @@ data class EventStoreEntity(
     @Column(columnDefinition = "TEXT")
     val errorMessage: String? = null,
 
-    @Version
-    val version: Long = 0
 )

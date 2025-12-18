@@ -14,6 +14,8 @@ import org.ghkdqhrbals.orchestrator.saga.service.SagaEventStreamService
 import org.ghkdqhrbals.message.service.EventStoreService
 import org.ghkdqhrbals.infra.event.SagaStateEntity
 import org.ghkdqhrbals.infra.event.EventStoreEntity
+import org.ghkdqhrbals.model.event.EventStoreModel
+import org.ghkdqhrbals.model.event.SagaStateModel
 import org.springframework.http.ResponseEntity
 import org.springframework.http.MediaType
 import org.springframework.web.bind.annotation.*
@@ -242,7 +244,7 @@ data class SagaStateResponse(
     val updatedAt: String
 ) {
     companion object {
-        fun from(entity: SagaStateEntity) = SagaStateResponse(
+        fun from(entity: SagaStateModel) = SagaStateResponse(
             sagaId = entity.sagaId,
             sagaType = entity.sagaType,
             status = entity.status.name,
@@ -284,7 +286,7 @@ data class EventResponse(
     val errorMessage: String?
 ) {
     companion object {
-        fun from(entity: EventStoreEntity) = EventResponse(
+        fun from(entity: EventStoreModel) = EventResponse(
             eventId = entity.eventId,
             sagaId = entity.sagaId,
             sequenceNumber = entity.sequenceNumber,

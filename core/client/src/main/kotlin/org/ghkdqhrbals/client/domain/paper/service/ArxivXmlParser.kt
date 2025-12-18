@@ -169,7 +169,7 @@ data class ArxivPaper(
         url = url,
         pdfUrl = url, // TODO 변경필요
         journalRefRaw = journalRefRaw,
-        publishedAt = publishedDate?.let { OffsetDateTime.parse(it) } ?: OffsetDateTime.now()
+        publishedAt = publishedDate?.let { OffsetDateTime.parse(it) } ?: OffsetDateTime.now(),
     )
 
     fun toSummaryEvent(eventId: String = ""): SummaryEvent {

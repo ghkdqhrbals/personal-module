@@ -2,6 +2,8 @@ package org.ghkdqhrbals.orchestrator.saga.service
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.ghkdqhrbals.message.service.EventStoreService
+import org.ghkdqhrbals.model.event.SagaStatus
+import org.ghkdqhrbals.model.event.SagaStatus.Companion.isFinished
 import org.slf4j.LoggerFactory
 import org.springframework.data.redis.connection.Message
 import org.springframework.data.redis.connection.MessageListener
@@ -145,7 +147,7 @@ class SagaEventStreamService(
             log.info("Event history sent successfully for sagaId: {}", sagaId)
 
             // Saga가 이미 완료 상태면 SSE 연결 종료
-            if (eventSourcing.currentStatus.name in listOf("COMPLETED", "FAILED", "COMPENSATION_COMPLETED", "COMPENSATION_FAILED")) {
+            if (eventSourcing.currentStatus.isFinished()) {
                 log.info("Saga already finished with status: {}, closing SSE connection for sagaId: {}", eventSourcing.currentStatus.name, sagaId)
                 emitter.complete()
                 complete(sagaId, emitter)
@@ -285,7 +287,7 @@ class SagaEventStreamService(
                     "success" to latestEvent.success,
                     "errorMessage" to latestEvent.errorMessage,
                     "timestamp" to latestEvent.timestamp.toInstant().toEpochMilli(),
-                    "payload" to objectMapper.readValue(latestEvent.payload, Map::class.java)
+                    "payload" to latestEvent.payload
                 )
 
                 publishEvent(sagaId, eventData)

@@ -44,14 +44,14 @@ class SubscribeService(
      * 사용자가 특정 주제를 구독
      */
     fun subscribeToTopic(userId: Long, subscribeId: Long, priority: Int = 3): UserSubscribe {
-        val user = userRepository.findById(userId)
-            .orElseThrow { IllegalArgumentException("사용자를 찾을 수 없습니다. ID: $userId") }
+        val user = userRepository.findById(userId)?: throw IllegalArgumentException("사용자를 찾을 수 없습니다. ID: $userId")
+
 
         val subscribe = subscribeRepository.findById(subscribeId)
             .orElseThrow { IllegalArgumentException("구독 주제를 찾을 수 없습니다. ID: $subscribeId") }
 
         // 이미 구독중인지 확인
-        val existing = userSubscribeRepository.findByUserAndSubscribeId(user, subscribeId)
+        val existing = userSubscribeRepository.findByUserIdAndSubscribeId(userId, subscribeId)
         if (existing != null) {
             // 이전에 구독 취소했다면 재구독
             if (!existing.isActive()) {
@@ -62,7 +62,7 @@ class SubscribeService(
         }
 
         val userSubscribe = UserSubscribe(
-            user = user,
+            userId = user.id!!,
             subscribe = subscribe,
             priority = priority
         )
@@ -74,10 +74,9 @@ class SubscribeService(
      * 사용자의 구독 취소
      */
     fun unsubscribeFromTopic(userId: Long, subscribeId: Long) {
-        val user = userRepository.findById(userId)
-            .orElseThrow { IllegalArgumentException("사용자를 찾을 수 없습니다. ID: $userId") }
+        val user = userRepository.findById(userId)?: throw IllegalArgumentException("사용자를 찾을 수 없습니다. ID: $userId")
 
-        val userSubscribe = userSubscribeRepository.findByUserAndSubscribeId(user, subscribeId)
+        val userSubscribe = userSubscribeRepository.findByUserIdAndSubscribeId(user.id!!, subscribeId)
             ?: throw IllegalArgumentException("구독 정보를 찾을 수 없습니다.")
 
         userSubscribe.unsubscribe()

@@ -9,5 +9,9 @@ enum class SagaStatus {
     COMPENSATING,
     COMPLETED,
     FAILED,
-    COMPENSATION_COMPLETED
+    COMPENSATION_COMPLETED;
+    companion object {
+        fun SagaStatus.isFinished(): Boolean = this in FINISHED
+        private val FINISHED = setOf(COMPLETED, COMPENSATION_COMPLETED, FAILED)
+    }
 }

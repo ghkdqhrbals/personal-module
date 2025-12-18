@@ -1,6 +1,7 @@
 package org.ghkdqhrbals.infra.user
 
 import jakarta.persistence.*
+import org.ghkdqhrbals.model.user.Gender
 import org.hibernate.annotations.CreationTimestamp
 import org.hibernate.annotations.UpdateTimestamp
 import java.time.OffsetDateTime
@@ -10,10 +11,10 @@ import kotlin.math.absoluteValue
 @Entity
 @Table(name = "users")
 class UserEntity private constructor(
-    var identity: String,
-    var password: String,
+    var identity: String? = null,
+    var password: String? = null,
     var name: String,
-    var phoneNumber: String,
+    var phoneNumber: String ? = null,
     @Enumerated(EnumType.STRING)
     var gender: Gender = Gender.UNKNOWN,
     var birth: OffsetDateTime? = null,
@@ -37,7 +38,7 @@ class UserEntity private constructor(
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    var id: Long = 0
+    var id: Long? = null
 
     var ci: String? = null
 

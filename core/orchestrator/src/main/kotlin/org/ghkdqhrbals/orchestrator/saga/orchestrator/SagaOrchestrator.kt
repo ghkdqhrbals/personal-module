@@ -167,9 +167,9 @@ class SagaOrchestrator(
 
         // 다음 스텝이 있으면 실행
         if (nextStepIndex < definition.getTotalSteps()) {
-            val sagaData = eventStoreService.parseSagaData(sagaState.sagaData) + responseEvent.payload
+            val sagaData = sagaState.sagaData?.plus(responseEvent.payload)
             eventStoreService.updateSagaState(sagaId, sagaData = sagaData)
-            executeStep(sagaId, definition, nextStepIndex, sagaData)
+            executeStep(sagaId, definition, nextStepIndex, sagaData!!)
         } else {
             // Saga 완료
             completeSaga(sagaId)
@@ -257,7 +257,7 @@ class SagaOrchestrator(
         }
 
         val sagaState = eventStoreService.getSagaState(sagaId)!!
-        val sagaData = eventStoreService.parseSagaData(sagaState.sagaData)
+        val sagaData = sagaState.sagaData ?: emptyMap()
 
         // 보상 명령 이벤트 생성
         val compensationEvent = SagaCommandEvent(

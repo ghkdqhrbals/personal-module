@@ -14,7 +14,7 @@ data class PaperModel(
     override val url: String,
     override val pdfUrl: String,
     override val journalRefRaw: String?,
-    override val impactFactor: Double?,
+    override val impactFactor: Double? = null,
     override val publishedAt: OffsetDateTime,
     override val summary: String? = null,
     override val novelty: String? = null,

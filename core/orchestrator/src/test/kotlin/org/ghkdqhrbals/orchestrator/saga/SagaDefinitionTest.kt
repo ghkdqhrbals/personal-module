@@ -5,7 +5,6 @@ import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 
 class SagaDefinitionTest {
-
     @Test
     fun `should create saga definition with steps`() {
         val saga = sagaDefinition("ORDER_CREATE") {

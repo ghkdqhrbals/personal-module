@@ -2,6 +2,7 @@ package org.ghkdqhrbals.client.domain.user.api
 
 import org.ghkdqhrbals.infra.user.UserEntity
 import org.ghkdqhrbals.client.domain.user.service.UserService
+import org.ghkdqhrbals.model.user.UserModel
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 
@@ -35,14 +36,14 @@ data class UserResponse(
     val status: String
 ) {
     companion object {
-        fun from(user: UserEntity): UserResponse {
+        fun from(user: UserModel): UserResponse {
             return UserResponse(
-                id = user.id,
+                id = user.id!!,
                 name = user.name,
                 email = user.email,
-                phoneNumber = user.phoneNumber,
-                gender = user.gender.name,
-                age = user.age,
+                phoneNumber = user.phoneNumber!!,
+                gender = user.gender?.name?:"UNKNOWN",
+                age = 0,
                 status = user.status.name
             )
         }

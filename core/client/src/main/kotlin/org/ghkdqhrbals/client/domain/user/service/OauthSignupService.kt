@@ -1,14 +1,13 @@
 package org.ghkdqhrbals.client.domain.user.service
 
-import org.ghkdqhrbals.infra.user.OauthProvider
-import org.ghkdqhrbals.infra.user.UserEntity
-import org.ghkdqhrbals.infra.user.OauthProviderRepository
-import org.ghkdqhrbals.infra.user.UserRepository
+import org.ghkdqhrbals.infra.user.*
+import org.ghkdqhrbals.model.user.UserModel
 import org.ghkdqhrbals.oauth.service.OAuthClientFactory
 import org.ghkdqhrbals.oauth.service.OAuthService
 import org.ghkdqhrbals.oauth.service.OauthProviderKind
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import java.time.OffsetDateTime
 
 @Service
 class OauthSignupService(
@@ -61,22 +60,29 @@ class OauthSignupService(
         }
 
         // 신규 유저 생성
-        val user = UserEntity.defUser().apply {
-            this.email = (userInfo.rawAttributes["email"] as? String)
-            this.name = (userInfo.rawAttributes["name"] as? String) ?: this.name
-        }
+        val user = UserModel(
+            id = null,
+            name = (userInfo.rawAttributes["name"] as? String) ?: "User${System.currentTimeMillis()}",
+            createdAt =  OffsetDateTime.now(),
+            updatedAt =  OffsetDateTime.now(),
+            status = org.ghkdqhrbals.model.user.Status.ACTIVE,
+            email = (userInfo.rawAttributes["email"] as? String),
+            activatedAt = OffsetDateTime.now(),
+            deletedAt = null,
+            oauthProviders = emptyList()
+        )
         val saved = userRepository.save(user)
 
         // OAuth provider 연결 저장
-        val link = OauthProvider(
-            userId = saved.id,
+        val link = OauthProviderEntity(
+            userId = saved.id!!,
             providerId = providerId,
             kind = provider,
         )
         oauthProviderRepository.save(link)
 
         return SignupResult(
-            userId = saved.id,
+            userId = saved.id!!,
             isNew = true,
             provider = provider,
             providerId = providerId,

@@ -117,7 +117,6 @@ class SagaResponseListener(
             eventType = map["eventType"] as? SagaEventType ?: SagaEventType.SAGA_RESPONSE,
             stepName = map["stepName"] as String,
             stepIndex = (map["stepIndex"] as Number).toInt(),
-            sourceService = map["sourceService"] as? String ?: "unknown",
             success = map["success"] as? Boolean ?: true,
             errorMessage = map["errorMessage"] as? String,
             payload = (map["payload"] as? Map<String, Any>) ?: emptyMap()

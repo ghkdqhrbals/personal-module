@@ -1,5 +1,6 @@
 package org.ghkdqhrbals.infra.subscribe
 
+import com.fasterxml.jackson.annotation.JsonIgnore
 import jakarta.persistence.*
 import org.ghkdqhrbals.infra.user.UserEntity
 import org.hibernate.annotations.CreationTimestamp
@@ -17,9 +18,8 @@ import java.time.OffsetDateTime
     ]
 )
 class UserSubscribe(
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "user_id", nullable = false)
-    var user: UserEntity,
+    @Column(name = "user_id")
+    val userId: Long,
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "subscribe_id", nullable = false)
@@ -35,9 +35,15 @@ class UserSubscribe(
      */
     var priority: Int = 3
 ) {
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     var id: Long = 0
+
+    @JsonIgnore
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id", updatable = false, insertable = false)
+    lateinit var user: UserEntity
 
     @CreationTimestamp
     var subscribedAt: OffsetDateTime = OffsetDateTime.now()

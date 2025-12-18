@@ -1,16 +1,11 @@
 package org.ghkdqhrbals.message.service
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import org.ghkdqhrbals.model.event.Event
-import org.ghkdqhrbals.model.event.EventHistory
 import org.ghkdqhrbals.infra.event.EventStoreEntity
 import org.ghkdqhrbals.infra.event.EventStoreRepository
 import org.ghkdqhrbals.infra.event.SagaStateEntity
 import org.ghkdqhrbals.infra.event.SagaStateRepository
-import org.ghkdqhrbals.model.event.SagaCommandEvent
-import org.ghkdqhrbals.model.event.SagaEvent
-import org.ghkdqhrbals.model.event.SagaResponseEvent
-import org.ghkdqhrbals.model.event.SagaStatus
+import org.ghkdqhrbals.model.event.*
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -31,39 +26,27 @@ class EventStoreService(
      * 이벤트를 Event Store에 저장
      */
     @Transactional
-    fun appendEvent(event: SagaEvent): EventStoreEntity {
+    fun appendEvent(event: SagaEvent): EventStoreModel {
         val nextSequence = eventStoreRepository.findMaxSequenceNumberBySagaId(event.sagaId) + 1
 
-        val entity = EventStoreEntity(
+        val model = EventStoreModel(
             eventId = event.eventId,
             sagaId = event.sagaId,
             sequenceNumber = nextSequence,
             eventType = event.eventType,
             timestamp = event.timestamp,
-            payload = objectMapper.writeValueAsString(event.payload),
-            stepName = when (event) {
-                is SagaCommandEvent -> event.stepName
-                is SagaResponseEvent -> event.stepName
-                else -> null
-            },
-            stepIndex = when (event) {
-                is SagaCommandEvent -> event.stepIndex
-                is SagaResponseEvent -> event.stepIndex
-                else -> null
-            },
-            success = when (event) {
-                is SagaResponseEvent -> event.success
-                else -> true
-            },
-            errorMessage = when (event) {
-                is SagaResponseEvent -> event.errorMessage
-                else -> null
-            }
+            payload = event.payload,
+            stepName = (event as? SagaStepEvent)?.stepName,
+            stepIndex = (event as? SagaStepEvent)?.stepIndex,
+            success = (event as? SagaResultEvent)?.success ?: true,
+            errorMessage = (event as? SagaResultEvent)?.errorMessage
         )
 
-        val saved = eventStoreRepository.save(entity)
-        log.debug("Event appended: sagaId={}, sequence={}, type={}",
-            event.sagaId, nextSequence, event.eventType)
+        val saved = eventStoreRepository.save(model)
+        log.debug(
+            "Event appended: sagaId={}, sequence={}, type={}",
+            event.sagaId, nextSequence, event.eventType
+        )
         return saved
     }
 
@@ -71,7 +54,7 @@ class EventStoreService(
      * Saga의 모든 이벤트를 순서대로 조회
      */
     @Transactional(readOnly = true)
-    fun getEventsBySagaId(sagaId: String): List<EventStoreEntity> {
+    fun getEventsBySagaId(sagaId: String): List<EventStoreModel> {
         return eventStoreRepository.findBySagaIdOrderBySequenceNumberAsc(sagaId)
     }
 
@@ -99,7 +82,7 @@ class EventStoreService(
                     stepIndex = event.stepIndex,
                     success = event.success,
                     errorMessage = event.errorMessage,
-                    payload = parseSagaData(event.payload)
+                    payload = event.payload
                 )
             },
             createdAt = state.createdAt,
@@ -126,18 +109,22 @@ class EventStoreService(
         sagaType: String,
         totalSteps: Int,
         sagaData: Map<String, Any>? = null
-    ): SagaStateEntity {
-        val state = SagaStateEntity(
+    ): SagaStateModel {
+        val state = SagaStateModel(
             sagaId = sagaId,
             sagaType = sagaType,
             status = SagaStatus.STARTED,
             currentStepIndex = 0,
             totalSteps = totalSteps,
-            sagaData = sagaData?.let { objectMapper.writeValueAsString(it) }
+            sagaData = sagaData ?: emptyMap(),
+            createdAt = OffsetDateTime.now(),
+            updatedAt = OffsetDateTime.now()
         )
-        val saved = sagaStateRepository.save(state)
-        log.info("Saga state created: sagaId={}, type={}, totalSteps={}",
-            sagaId, sagaType, totalSteps)
+        val saved = sagaStateRepository.insert(state)
+        log.info(
+            "Saga state created: sagaId={}, type={}, totalSteps={}",
+            sagaId, sagaType, totalSteps
+        )
         return saved
     }
 
@@ -150,18 +137,18 @@ class EventStoreService(
         status: SagaStatus? = null,
         currentStepIndex: Int? = null,
         sagaData: Map<String, Any>? = null
-    ): SagaStateEntity {
-        val state = sagaStateRepository.findById(sagaId)
-            .orElseThrow { IllegalStateException("Saga not found: $sagaId") }
+    ): SagaStateModel {
+        val state = sagaStateRepository.findById(sagaId)?: throw IllegalStateException("Saga not found: $sagaId")
 
         status?.let { state.status = it }
         currentStepIndex?.let { state.currentStepIndex = it }
-        sagaData?.let { state.sagaData = objectMapper.writeValueAsString(it) }
         state.updatedAt = OffsetDateTime.now()
 
         val saved = sagaStateRepository.save(state)
-        log.debug("Saga state updated: sagaId={}, status={}, currentStep={}",
-            sagaId, state.status, state.currentStepIndex)
+        log.debug(
+            "Saga state updated: sagaId={}, status={}, currentStep={}",
+            sagaId, state.status, state.currentStepIndex
+        )
         return saved
     }
 
@@ -169,15 +156,15 @@ class EventStoreService(
      * Saga 상태 조회
      */
     @Transactional(readOnly = true)
-    fun getSagaState(sagaId: String): SagaStateEntity? {
-        return sagaStateRepository.findById(sagaId).orElse(null)
+    fun getSagaState(sagaId: String): SagaStateModel? {
+        return sagaStateRepository.findById(sagaId)
     }
 
     /**
      * 활성 Saga 목록 조회
      */
     @Transactional(readOnly = true)
-    fun getActiveSagas(): List<SagaStateEntity> {
+    fun getActiveSagas(): List<SagaStateModel> {
         return sagaStateRepository.findActiveSagas()
     }
 

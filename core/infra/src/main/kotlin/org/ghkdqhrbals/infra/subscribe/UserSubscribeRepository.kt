@@ -12,6 +12,8 @@ interface UserSubscribeRepository : JpaRepository<UserSubscribe, Long> {
 
     fun findByUserAndSubscribeId(user: UserEntity, subscribeId: Long): UserSubscribe?
 
+    fun findByUserIdAndSubscribeId(userId: Long, subscribeId: Long): UserSubscribe?
+
     fun existsByUserIdAndSubscribeId(userId: Long, subscribeId: Long): Boolean
 }
 

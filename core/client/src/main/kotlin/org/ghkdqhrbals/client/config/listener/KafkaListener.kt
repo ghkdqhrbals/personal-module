@@ -73,7 +73,7 @@ class KafkaListeners(
                                 sagaId = event.sagaId,
                                 eventType = event.eventType,
                                 sourceService = "AiPreprocessor",
-                                timestamp = OffsetDateTime.now(ZoneOffset.UTC).toInstant(),
+                                timestamp = OffsetDateTime.now(ZoneOffset.UTC),
                                 stepName = "AiProcess",
                                 stepIndex = event.stepIndex + 1,
                                 success = true,

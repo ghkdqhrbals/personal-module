@@ -2,7 +2,6 @@ create table if not exists event_store
 (
     created_at   datetime(6)  not null,
     timestamp    datetime(6)  not null,
-    version      bigint       not null,
     event_id     varchar(36)  not null
         primary key,
     aggregate_id varchar(100) not null,

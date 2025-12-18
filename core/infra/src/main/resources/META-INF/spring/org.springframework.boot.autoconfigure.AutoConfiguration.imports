@@ -1,3 +1,4 @@
 org.ghkdqhrbals.infra.RepositoryModuleConfiguration
 org.ghkdqhrbals.infra.paper.PaperRepositoryAutoConfiguration
-
+org.ghkdqhrbals.infra.event.EventRepositoryAutoConfiguration
+org.ghkdqhrbals.infra.user.UserRepositoryAutoConfiguration

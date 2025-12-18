@@ -7,7 +7,6 @@ create table if not exists saga_state (
                             saga_data text,
                             created_at timestamp(6) not null,
                             updated_at timestamp(6) not null,
-                            version bigint not null,
                             primary key (saga_id)
 );
 
@@ -26,7 +25,6 @@ create table saga_event_store (
                                   step_index int,
                                   success bit not null,
                                   error_message text,
-                                  version bigint not null,
                                   primary key (id)
 );
 
