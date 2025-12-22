@@ -12,22 +12,6 @@ import org.springframework.web.bind.annotation.*
 class PaperController(
     private val llmClient: LlmClient
 ) {
-
-    @GetMapping("/categories")
-    @Operation(
-        summary = "지원 카테고리 목록",
-        description = "검색 가능한 학술 카테고리 목록을 조회합니다"
-    )
-    fun getSupportedCategories(): ResponseEntity<List<String>> {
-        val categories = listOf(
-            "Computer Science",
-            "Medicine",
-            "Physics",
-            "Biology"
-        )
-        return ResponseEntity.ok(categories)
-    }
-
     @PostMapping("/summarize")
     @Operation(
         summary = "논문 초록 요약",

@@ -3,6 +3,21 @@ spring:
   config:
     activate:
       on-profile: local
-  redis:
-    cluster:
-      nodes: localhost:7000,localhost:7001,localhost:7002,localhost:7003,localhost:7004,localhost:7005
+  data:
+    redis:
+      client-type: lettuce
+      timeout: 3000ms
+      cluster:
+        nodes:
+          - localhost:9001
+          - localhost:9002
+          - localhost:9003
+          - localhost:9004
+          - localhost:9005
+          - localhost:9006
+      lettuce:
+        pool:
+          max-active: 16
+          max-idle: 8
+          min-idle: 2
+          max-wait: 2000ms
