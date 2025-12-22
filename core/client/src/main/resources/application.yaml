@@ -4,6 +4,7 @@ spring:
     import:
       - optional:aws-secretsmanager:personal/beta
       - classpath:application-kafka.yaml
+      - classpath:application-redis.yaml
       - classpath:application-mysql.yaml
       - classpath:application-common.yaml
   cloud:
