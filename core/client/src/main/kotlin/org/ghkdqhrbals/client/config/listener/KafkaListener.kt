@@ -2,13 +2,11 @@ package org.ghkdqhrbals.client.config.listener
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.ghkdqhrbals.client.ai.LlmClient
+import org.ghkdqhrbals.message.kafka.config.ConditionalOnKafkaEnabled
 import org.ghkdqhrbals.message.kafka.sender.SagaMessageSender
 import org.ghkdqhrbals.message.saga.definition.SagaTopics
 import org.ghkdqhrbals.message.service.EventStoreService
 import org.ghkdqhrbals.message.util.toMap
-import org.ghkdqhrbals.message.util.toMapWithoutNull
-import org.ghkdqhrbals.model.domain.toJson
-import org.ghkdqhrbals.model.event.SagaCommand
 import org.ghkdqhrbals.model.event.SagaResponse
 import org.ghkdqhrbals.model.event.SagaStatus
 import org.ghkdqhrbals.model.event.parser.EventParser
@@ -17,11 +15,12 @@ import org.springframework.kafka.annotation.KafkaListener
 import org.springframework.messaging.handler.annotation.Header
 import org.springframework.messaging.handler.annotation.Payload
 import org.springframework.stereotype.Component
-import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
 
+
 @Component
+@ConditionalOnKafkaEnabled
 class KafkaListeners(
     private val eventParser: EventParser,
     private val sender: SagaMessageSender,
@@ -60,21 +59,6 @@ class KafkaListeners(
                         event.payload["journalRef"] as? String ?: ""
                     )
                     val map = response.toMap()
-
-                    sender.sendResponse(
-                        sagaId = event.sagaId,
-                        SagaResponse(
-                            eventId = event.eventId,
-                            sagaId = event.sagaId,
-                            eventType = event.eventType,
-                            sourceService = "AiPreprocessor",
-                            timestamp = OffsetDateTime.now(ZoneOffset.UTC).toInstant(),
-                            stepName = "AiProcess",
-                            stepIndex = event.stepIndex + 1,
-                            success = true,
-                            payload = map
-                        )
-                    )
                 }
                 else -> {
                     log.warn("Received response for saga in unexpected state: sagaId={}, status={}",

@@ -5,9 +5,6 @@ package org.ghkdqhrbals.model.event
  */
 enum class SagaEventType {
     SAGA_STARTED,
-    SAGA_STEP_STARTED,
-    SAGA_STEP_COMPLETED,
-    SAGA_STEP_FAILED,
     SAGA_COMPENSATING,
     SAGA_COMPENSATION_COMPLETED,
     SAGA_COMPLETED,

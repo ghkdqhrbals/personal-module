@@ -4,6 +4,11 @@ import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.tags.Tag
+import org.ghkdqhrbals.message.service.EventStoreService
+import org.ghkdqhrbals.model.event.BaseSagaEvent
+import org.ghkdqhrbals.model.event.SagaEvent
+import org.ghkdqhrbals.model.event.SagaEventType
+import java.time.Instant
 import kotlin.system.measureTimeMillis
 import java.util.concurrent.ConcurrentHashMap
 
@@ -11,7 +16,8 @@ import java.util.concurrent.ConcurrentHashMap
 @RequestMapping("/api/chat")
 @Tag(name = "Chat", description = "OpenAI 텍스트/채팅 API")
 class ChatController(
-    private val ollamaClientImpl: LlmClient
+    private val ollamaClientImpl: LlmClient,
+    private val eventStoreService: EventStoreService,
 ) {
 
     @PostMapping("/completions")
@@ -21,6 +27,18 @@ class ChatController(
     ): ResponseEntity<ChatResponse> {
         val response = ollamaClientImpl.createChatCompletion(request)
         return ResponseEntity.ok(response)
+    }
+
+    @GetMapping("/send-event")
+    fun send(): SagaEvent {
+        val sendEvent = eventStoreService.sendEvent(
+            "test-topic",
+            BaseSagaEvent(
+                eventType = SagaEventType.SAGA_STARTED,
+                timestamp = Instant.now()
+            )
+        )
+        return sendEvent
     }
 
     @PostMapping("/send")

@@ -4,6 +4,7 @@ spring:
     activate:
       on-profile: local
   kafka:
+    enabled: false
     bootstrap-servers: localhost:29092,localhost:39092,localhost:49092
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
@@ -19,6 +20,7 @@ spring:
     activate:
       on-profile: dev
   kafka:
+    enabled: false
     bootstrap-servers: localhost:29092,localhost:39092,localhost:49092
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer

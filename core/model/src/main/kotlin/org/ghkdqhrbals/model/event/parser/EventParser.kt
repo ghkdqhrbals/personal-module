@@ -19,8 +19,6 @@ class EventParser(
             eventId = map["eventId"] as? String ?: UUID.randomUUID().toString(),
             sagaId = map["sagaId"] as String,
             eventType = map["eventType"] as? SagaEventType ?: SagaEventType.SAGA_RESPONSE,
-            stepName = map["stepName"] as String,
-            stepIndex = (map["stepIndex"] as Number).toInt(),
             sourceService = map["sourceService"] as? String ?: "unknown",
             success = map["success"] as? Boolean ?: true,
             errorMessage = map["errorMessage"] as? String,

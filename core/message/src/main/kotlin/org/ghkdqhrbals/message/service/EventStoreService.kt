@@ -1,6 +1,7 @@
 package org.ghkdqhrbals.message.service
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import org.ghkdqhrbals.message.event.EventSender
 import org.ghkdqhrbals.repository.event.EventStoreEntity
 import org.ghkdqhrbals.repository.event.EventStoreRepository
 import org.ghkdqhrbals.repository.event.SagaStateEntity
@@ -22,48 +23,41 @@ import java.time.OffsetDateTime
 class EventStoreService(
     private val eventStoreRepository: EventStoreRepository,
     private val sagaStateRepository: SagaStateRepository,
+    private val eventSender: EventSender,
     private val objectMapper: ObjectMapper
 ) {
     private val log = LoggerFactory.getLogger(EventStoreService::class.java)
 
-    /**
-     * 이벤트를 Event Store에 저장
-     */
-    @Transactional
-    fun appendEvent(event: SagaEvent): EventStoreEntity {
-        val nextSequence = eventStoreRepository.findMaxSequenceNumberBySagaId(event.sagaId) + 1
-
-        val entity = EventStoreEntity(
-            eventId = event.eventId,
-            sagaId = event.sagaId,
-            sequenceNumber = nextSequence,
-            eventType = event.eventType,
-            timestamp = event.timestamp,
-            payload = objectMapper.writeValueAsString(event.payload),
-            stepName = when (event) {
-                is SagaCommandEvent -> event.stepName
-                is SagaResponseEvent -> event.stepName
-                else -> null
-            },
-            stepIndex = when (event) {
-                is SagaCommandEvent -> event.stepIndex
-                is SagaResponseEvent -> event.stepIndex
-                else -> null
-            },
-            success = when (event) {
-                is SagaResponseEvent -> event.success
-                else -> true
-            },
-            errorMessage = when (event) {
-                is SagaResponseEvent -> event.errorMessage
-                else -> null
-            }
+    fun sendEvent(topic: String, event: SagaEvent): SagaEvent {
+        val timestamp = Instant.now()
+        val eventWithTimestamp = when (event) {
+            is SagaCommandEvent -> event.copy(timestamp = timestamp)
+            is SagaResponseEvent -> event.copy(timestamp = timestamp)
+            else -> event
+        }
+        val eventId = eventSender.send(topic, eventWithTimestamp)
+        log.info("Send event to topic {}: sagaId={}, eventType={}",
+            topic, eventId, event.eventType)
+        eventStoreRepository.save(
+            EventStoreEntity(
+                topic = topic,
+                eventId = eventId,
+                sagaId = eventId,
+                sequenceNumber = 1,
+                eventType = eventWithTimestamp.eventType,
+                timestamp = eventWithTimestamp.timestamp,
+                payload = objectMapper.writeValueAsString(eventWithTimestamp.payload),
+                success = when (eventWithTimestamp) {
+                    is SagaResponseEvent -> eventWithTimestamp.success
+                    else -> true
+                },
+                errorMessage = when (eventWithTimestamp) {
+                    is SagaResponseEvent -> eventWithTimestamp.errorMessage
+                    else -> null
+                }
+            )
         )
-
-        val saved = eventStoreRepository.save(entity)
-        log.debug("Event appended: sagaId={}, sequence={}, type={}",
-            event.sagaId, nextSequence, event.eventType)
-        return saved
+        return eventWithTimestamp
     }
 
     /**

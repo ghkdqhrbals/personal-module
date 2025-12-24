@@ -25,6 +25,8 @@ data class EventStoreEntity(
     @Column(nullable = false, length = 36)
     val eventId: String,
 
+    val topic: String,
+
     @Column(nullable = false, length = 36)
     val sagaId: String,
 
@@ -41,18 +43,9 @@ data class EventStoreEntity(
     @Column(nullable = false, columnDefinition = "TEXT")
     val payload: String,
 
-    @Column(length = 100)
-    val stepName: String? = null,
-
-    @Column
-    val stepIndex: Int? = null,
-
     @Column(nullable = false)
     val success: Boolean = true,
 
     @Column(columnDefinition = "TEXT")
     val errorMessage: String? = null,
-
-    @Version
-    val version: Long = 0
 )
