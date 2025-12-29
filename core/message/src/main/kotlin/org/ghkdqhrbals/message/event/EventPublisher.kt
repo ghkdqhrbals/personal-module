@@ -1,5 +1,5 @@
 package org.ghkdqhrbals.message.event
 
-interface EventSender {
+interface EventPublisher {
     fun <T : Any> send(topic: String, event: T): String
 }

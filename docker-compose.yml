@@ -24,20 +24,14 @@ services:
 #      retries: 3
 #      start_period: 90s
 
-  redis:
-    image: redis:7-alpine
-    container_name: redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
     restart: unless-stopped
-    command: redis-server --appendonly yes
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./grafana_data:/var/lib/grafana
 
   db:
     image: arm64v8/mysql:8.0.32
@@ -68,4 +62,6 @@ volumes:
   ollama_data:
     driver: local
   redis_data:
+    driver: local
+  grafana_data:
     driver: local

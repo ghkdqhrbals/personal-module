@@ -19,7 +19,7 @@ class  RedisStreamListener(
 ) : StreamListener<String, ObjectRecord<String, String>> {
 
     override fun onMessage(message: ObjectRecord<String, String>) {
-        logger().info("[NOTIFICATION STREAM] Receive ${message.id} -> $message")
+        logger().info("[STREAM] Receive ${message.id} -> $message")
         val recordId = message.id.value
 
         try {

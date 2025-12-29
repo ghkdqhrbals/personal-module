@@ -1,6 +1,6 @@
 package org.ghkdqhrbals.message.event
 
-import org.ghkdqhrbals.message.redis.RedisStreamSender
+import org.ghkdqhrbals.message.redis.RedisStreamPublisher
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.data.redis.core.StringRedisTemplate
@@ -10,5 +10,5 @@ class MessageQueueConfiguration(
     private val redisStringTemplate: StringRedisTemplate
 ) {
     @Bean
-    fun eventSender() = RedisStreamSender(redisStringTemplate)
+    fun eventSender() = RedisStreamPublisher(redisStringTemplate)
 }

@@ -1,17 +1,17 @@
 package org.ghkdqhrbals.message.kafka.sender
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import org.ghkdqhrbals.message.event.EventSender
+import org.ghkdqhrbals.message.event.EventPublisher
 import org.slf4j.LoggerFactory
 import org.springframework.kafka.core.KafkaTemplate
 
 /**
  * Saga 메시지 전송 컴포넌트
  */
-class SagaMessageSender(
+class SagaMessagePublisher(
     private val kafkaTemplate: KafkaTemplate<String, String>,
     private val objectMapper: ObjectMapper
-): EventSender {
+): EventPublisher {
     private val log = LoggerFactory.getLogger(this::class.java)
     override fun <T : Any> send(topic: String, event: T): String {
         val id = java.util.UUID.randomUUID().toString()

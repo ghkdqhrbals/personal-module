@@ -2,6 +2,7 @@ package org.ghkdqhrbals.client.domain.paper.service
 
 import org.ghkdqhrbals.client.config.log.logger
 import org.ghkdqhrbals.client.controller.paper.dto.*
+import org.ghkdqhrbals.message.event.EventPublisher
 import org.ghkdqhrbals.repository.paper.PaperEntity
 import org.ghkdqhrbals.repository.paper.PaperRepository
 import org.ghkdqhrbals.model.paper.PaperSearchAndStoreEvent
@@ -22,6 +23,7 @@ class ArxivService(
     private val paperRepository: PaperRepository,
     private val redisTemplate: StringRedisTemplate,
     private val arxivHttpClient: ArxivHttpClient,
+    private val eventPublisher: EventPublisher,
 ) {
     fun existsById(arxivId: String): Boolean {
         return paperRepository.existsByArxivId(arxivId)
@@ -67,6 +69,27 @@ class ArxivService(
         return returnMaps
     }
 
+    fun search(
+        query: String,
+        categories: List<String>? = null,
+        maxResults: Int = 10,
+        page: Int = 0,
+        fromDate: String? = null,
+        summarize: Boolean = true
+    ): List<ArxivPaper> {
+        return arxivHttpClient.search(
+            PaperSearchAndStoreEvent(
+                searchEventId = UUID.randomUUID().toString(),
+                query = query,
+                categories = categories,
+                maxResults = maxResults,
+                page = page,
+                fromDate = fromDate,
+                shouldSummarize = summarize,
+            )
+        )
+    }
+
     /**
      * 비동기 arXiv 검색 시작 - 이벤트 ID만 즉시 반환
      */
@@ -92,7 +115,7 @@ class ArxivService(
                 fromDate = fromDate,
                 shouldSummarize = summarize,
             )
-            // 여기서 이벤트 쏘면 됨.
+
 
             logger().info(
                 "[ArxivService] Published PaperSearchAndStoreEvent: " +

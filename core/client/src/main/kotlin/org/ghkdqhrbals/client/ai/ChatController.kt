@@ -4,11 +4,12 @@ import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.tags.Tag
-import org.ghkdqhrbals.message.service.EventStoreService
+import org.ghkdqhrbals.client.domain.paper.service.ArxivService
+import org.ghkdqhrbals.message.service.EventService
 import org.ghkdqhrbals.model.event.BaseSagaEvent
-import org.ghkdqhrbals.model.event.SagaEvent
 import org.ghkdqhrbals.model.event.SagaEventType
 import java.time.Instant
+import java.util.*
 import kotlin.system.measureTimeMillis
 import java.util.concurrent.ConcurrentHashMap
 
@@ -17,7 +18,8 @@ import java.util.concurrent.ConcurrentHashMap
 @Tag(name = "Chat", description = "OpenAI 텍스트/채팅 API")
 class ChatController(
     private val ollamaClientImpl: LlmClient,
-    private val eventStoreService: EventStoreService,
+    private val eventService: EventService,
+    private val arxivService: ArxivService,
 ) {
 
     @PostMapping("/completions")
@@ -30,15 +32,76 @@ class ChatController(
     }
 
     @GetMapping("/send-event")
-    fun send(): SagaEvent {
-        val sendEvent = eventStoreService.sendEvent(
-            "test-topic",
-            BaseSagaEvent(
-                eventType = SagaEventType.SAGA_STARTED,
-                timestamp = Instant.now()
+    @Operation(summary = "논문 요약 이벤트 전송", description = "arxiv 논문을 검색하고 요약 이벤트를 전송합니다")
+    fun send(
+        @RequestParam query: String,
+        @RequestParam categories: List<String>
+    ): ResponseEntity<SendEventResponse> {
+
+        val response = arxivService.search(query = query, categories = categories)
+        // UUID
+        val sagaId = UUID.randomUUID().toString()
+
+        val eventIds = mutableListOf<String>()
+        response.forEach { paper ->
+            val sendEvent = eventService.sendEvent(
+                "summary:1",
+                BaseSagaEvent(
+                    sagaId = sagaId,
+                    eventType = SagaEventType.SAGA_STARTED,
+                    timestamp = Instant.now(),
+                    payload = paper
+                )
+            )
+            sendEvent.eventId?.let { eventIds.add(it) }
+        }
+
+        return ResponseEntity.ok(
+            SendEventResponse(
+                sagaId = sagaId,
+                totalEvents = eventIds.size,
+                eventIds = eventIds,
+                message = "${eventIds.size}개의 논문 요약 이벤트가 전송되었습니다. sagaId로 결과를 확인하세요."
             )
         )
-        return sendEvent
+    }
+
+    @GetMapping("/saga-status/{sagaId}")
+    @Operation(summary = "Saga 이벤트 결과 조회", description = "sagaId로 전송된 모든 이벤트의 결과를 조회합니다")
+    fun getSagaStatus(
+        @PathVariable sagaId: String
+    ): ResponseEntity<SagaStatusResponse> {
+        val events = eventService.getEventsBySagaId(sagaId)
+        val sagaState = eventService.getSagaState(sagaId)
+
+        return ResponseEntity.ok(
+            SagaStatusResponse(
+                sagaId = sagaId,
+                status = sagaState?.status?.name ?: "UNKNOWN",
+                totalEvents = events.size,
+                successCount = events.count { it.success },
+                failureCount = events.count { !it.success },
+                events = events.map {
+                    EventInfo(
+                        eventId = it.eventId,
+                        eventType = it.eventType.name,
+                        timestamp = it.timestamp,
+                        success = it.success,
+                        errorMessage = it.errorMessage,
+                        payload = it.payload
+                    )
+                },
+                sagaState = sagaState?.let {
+                    SagaStateInfo(
+                        sagaType = it.sagaType,
+                        currentStep = it.currentStepIndex,
+                        totalSteps = it.totalSteps,
+                        createdAt = it.createdAt,
+                        updatedAt = it.updatedAt
+                    )
+                }
+            )
+        )
     }
 
     @PostMapping("/send")
@@ -186,5 +249,39 @@ data class OllamaParallelTestResponse(
     val totalTimeMs: Long,
     val averageTimeMs: Double,
     val results: List<OllamaTestResult>
+)
+
+data class SendEventResponse(
+    val sagaId: String,
+    val totalEvents: Int,
+    val eventIds: List<String>,
+    val message: String
+)
+
+data class SagaStatusResponse(
+    val sagaId: String,
+    val status: String,
+    val totalEvents: Int,
+    val successCount: Int,
+    val failureCount: Int,
+    val events: List<EventInfo>,
+    val sagaState: SagaStateInfo?
+)
+
+data class EventInfo(
+    val eventId: String,
+    val eventType: String,
+    val timestamp: Instant,
+    val success: Boolean,
+    val errorMessage: String?,
+    val payload: String?
+)
+
+data class SagaStateInfo(
+    val sagaType: String,
+    val currentStep: Int,
+    val totalSteps: Int,
+    val createdAt: java.time.OffsetDateTime,
+    val updatedAt: java.time.OffsetDateTime
 )
 

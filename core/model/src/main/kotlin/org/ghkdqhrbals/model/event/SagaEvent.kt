@@ -10,9 +10,16 @@ interface SagaEvent {
     val sagaId: String?
     val eventType: SagaEventType
     val timestamp: Instant
-    val payload: Map<String, Any>
+    val payload: Any?
 }
 
+data class SummaryPayload(
+    val paperId: String,
+    val source: String? = "arxiv",
+    val title: String,
+    val abstract: String,
+    val journalRefRaw: String?
+)
 /**
  * Saga 이벤트의 기본 구현체
  */
@@ -21,12 +28,12 @@ data class BaseSagaEvent(
     override val sagaId: String? = null,
     override val eventType: SagaEventType,
     override val timestamp: Instant = Instant.now(),
-    override val payload: Map<String, Any> = emptyMap()
+    override val payload: Any? = null
 ) : SagaEvent {
     companion object {
         fun create(
             eventType: SagaEventType,
-            payload: Map<String, Any> = emptyMap()
+            payload: Any? = null
         ): BaseSagaEvent {
             return BaseSagaEvent(
                 eventId = null,
@@ -46,7 +53,7 @@ data class SagaCommandEvent(
     override val sagaId: String,
     override val eventType: SagaEventType,
     override val timestamp: Instant = Instant.now(),
-    override val payload: Map<String, Any> = emptyMap()
+    override val payload: Any? = null
 ) : SagaEvent
 
 /**
@@ -57,7 +64,7 @@ data class SagaResponseEvent(
     override val sagaId: String,
     override val eventType: SagaEventType,
     override val timestamp: Instant = Instant.now(),
-    override val payload: Map<String, Any> = emptyMap(),
+    override val payload: Any? = null,
     val sourceService: String,
     val success: Boolean,
     val errorMessage: String? = null
