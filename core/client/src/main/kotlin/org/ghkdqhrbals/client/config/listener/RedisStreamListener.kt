@@ -2,10 +2,7 @@ package org.ghkdqhrbals.client.config.listener
 
 import org.ghkdqhrbals.client.config.log.logger
 import org.ghkdqhrbals.message.redis.ConditionalOnRedisStreamEnabled
-import org.ghkdqhrbals.message.redis.xAckDel
-import org.ghkdqhrbals.model.domain.Jackson
 import org.springframework.context.annotation.Profile
-import org.springframework.data.redis.connection.stream.ByteRecord
 import org.springframework.data.redis.connection.stream.ObjectRecord
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.data.redis.stream.StreamListener
@@ -35,11 +32,11 @@ class  RedisStreamListener(
     ) {
         logger().info("처리할 메시지 ID: $recordId, 내용: $message")
 
-        ackDel(
-            topic = message.stream!!,
-            group = RedisStreamConfiguration.CONSUMER_GROUP_NAME,
-            recordId = recordId,
-        )
+//        ackDel(
+//            topic = message.stream!!,
+//            group = RedisStreamConfiguration.CONSUMER_GROUP_NAME,
+//            recordId = recordId,
+//        )
     }
 
     private fun ackDel(topic: String, group: String, recordId: String) {

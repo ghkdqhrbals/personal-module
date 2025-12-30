@@ -3,7 +3,7 @@ package org.ghkdqhrbals.client.config
 import org.ghkdqhrbals.client.config.interceptor.ApiCallInterceptor
 import org.ghkdqhrbals.client.config.log.ExternalApiLog
 import org.ghkdqhrbals.client.config.log.logger
-import org.ghkdqhrbals.model.domain.toJson
+import org.ghkdqhrbals.model.config.toJson
 import org.springframework.stereotype.Component
 import org.springframework.http.HttpRequest
 import org.springframework.http.client.ClientHttpRequestExecution

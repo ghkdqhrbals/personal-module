@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8"/>
+    <title>Redis Stream Message Detail</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            padding: 24px;
+        }
+        h2 {
+            color: #333;
+            margin-bottom: 24px;
+            font-size: 24px;
+        }
+        .search-section {
+            background: #f9f9f9;
+            padding: 20px;
+            border-radius: 6px;
+            margin-bottom: 24px;
+        }
+        .input-group {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+        input[type="text"] {
+            flex: 1;
+            padding: 10px 14px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #4CAF50;
+        }
+        button {
+            padding: 10px 20px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .result-section {
+            margin-top: 24px;
+        }
+        .message-card {
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            padding: 20px;
+            margin-bottom: 16px;
+        }
+        .message-header {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 16px;
+            margin-bottom: 16px;
+            padding-bottom: 16px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+        .info-item {
+            display: flex;
+            flex-direction: column;
+        }
+        .info-label {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 4px;
+            font-weight: 500;
+            text-transform: uppercase;
+        }
+        .info-value {
+            font-size: 14px;
+            color: #333;
+            font-family: 'Monaco', 'Courier New', monospace;
+        }
+        .fields-section {
+            margin-top: 16px;
+        }
+        .fields-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 12px;
+        }
+        .field-item {
+            display: grid;
+            grid-template-columns: 200px 1fr;
+            gap: 12px;
+            padding: 8px 0;
+            border-bottom: 1px solid #f5f5f5;
+        }
+        .field-item:last-child {
+            border-bottom: none;
+        }
+        .field-key {
+            font-weight: 500;
+            color: #555;
+            word-break: break-word;
+        }
+        .field-value {
+            color: #333;
+            word-break: break-word;
+            white-space: pre-wrap;
+        }
+        .error-message {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            color: #856404;
+            padding: 12px 16px;
+            border-radius: 4px;
+            margin-top: 16px;
+        }
+        .success-message {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+            padding: 12px 16px;
+            border-radius: 4px;
+            margin-top: 16px;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #999;
+        }
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #4CAF50;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 16px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .json-viewer {
+            background: #f5f5f5;
+            padding: 12px;
+            border-radius: 4px;
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 13px;
+            overflow-x: auto;
+        }
+        .copy-btn {
+            background: #2196F3;
+            padding: 6px 12px;
+            font-size: 12px;
+            margin-left: 8px;
+        }
+        .copy-btn:hover {
+            background: #0b7dda;
+        }
+        .hint {
+            font-size: 12px;
+            color: #999;
+            margin-top: 4px;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h2>📨 Redis Stream Message Detail Viewer</h2>
+
+    <div class="search-section">
+        <div class="input-group">
+            <input
+                type="text"
+                id="streamName"
+                placeholder="Stream 이름 입력 (예: summary:1)"
+                value="summary:1"
+            />
+            <input
+                type="text"
+                id="messageId"
+                placeholder="Message ID 입력 (예: 1735541234567-0)"
+            />
+        </div>
+        <div class="input-group">
+            <button onclick="MSG.search()">🔍 메시지 조회</button>
+            <button onclick="MSG.clear()">🗑️ 초기화</button>
+        </div>
+        <div class="hint">
+            💡 Tip: Message ID는 "timestamp-sequence" 형식입니다 (예: 1735541234567-0)
+        </div>
+    </div>
+
+    <div id="resultContainer"></div>
+</div>
+
+<script>
+(function() {
+    const MSG = {};
+    window.MSG = MSG;
+
+    let currentMessage = null;
+
+    MSG.search = async function() {
+        const streamName = document.getElementById('streamName').value.trim();
+        const messageId = document.getElementById('messageId').value.trim();
+
+        if (!streamName) {
+            showError('Stream 이름을 입력해주세요.');
+            return;
+        }
+
+        if (!messageId) {
+            showError('Message ID를 입력해주세요.');
+            return;
+        }
+
+        showLoading();
+
+        try {
+            const url = `http://localhost:7070/monitoring/streams/message/${encodeURIComponent(streamName)}/${encodeURIComponent(messageId)}`;
+            console.log('REQUEST:', url);
+
+            const response = await fetch(url);
+
+            if (!response.ok) {
+                if (response.status === 404) {
+                    showError(`메시지를 찾을 수 없습니다. (Stream: ${streamName}, ID: ${messageId})`);
+                } else {
+                    showError(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                return;
+            }
+
+            const data = await response.json();
+            currentMessage = data;
+
+            if (!data || Object.keys(data).length === 0) {
+                showEmpty();
+                return;
+            }
+
+            renderMessage(data, streamName, messageId);
+
+        } catch (error) {
+            console.error('Error:', error);
+            showError(`요청 실패: ${error.message}`);
+        }
+    };
+
+    MSG.clear = function() {
+        document.getElementById('messageId').value = '';
+        document.getElementById('resultContainer').innerHTML = '';
+        currentMessage = null;
+    };
+
+    function showLoading() {
+        document.getElementById('resultContainer').innerHTML = `
+            <div class="loading">
+                <div class="spinner"></div>
+                <div>메시지를 조회하는 중...</div>
+            </div>
+        `;
+    }
+
+    function showError(message) {
+        document.getElementById('resultContainer').innerHTML = `
+            <div class="error-message">
+                ⚠️ ${message}
+            </div>
+        `;
+    }
+
+    function showEmpty() {
+        document.getElementById('resultContainer').innerHTML = `
+            <div class="empty-state">
+                <div class="empty-state-icon">📭</div>
+                <div>메시지가 없거나 이미 삭제되었습니다.</div>
+            </div>
+        `;
+    }
+
+    function renderMessage(data, streamName, messageId) {
+        const { id, ...fields } = data;
+        const actualId = id || messageId;
+
+        // timestamp 추출 (ID의 첫 번째 부분)
+        const timestampMs = actualId.split('-')[0];
+        const timestamp = new Date(parseInt(timestampMs));
+        const isValidDate = !isNaN(timestamp.getTime());
+
+        const fieldsHtml = Object.entries(fields).map(([key, value]) => {
+            let displayValue = value;
+
+            // JSON 형식인지 확인
+            if (typeof value === 'string' && (value.startsWith('{') || value.startsWith('['))) {
+                try {
+                    const parsed = JSON.parse(value);
+                    displayValue = JSON.stringify(parsed, null, 2);
+                } catch (e) {
+                    // JSON 파싱 실패 시 원본 사용
+                }
+            }
+
+            return `
+                <div class="field-item">
+                    <div class="field-key">${escapeHtml(key)}</div>
+                    <div class="field-value">${escapeHtml(displayValue)}</div>
+                </div>
+            `;
+        }).join('');
+
+        const jsonStr = JSON.stringify(data, null, 2);
+
+        document.getElementById('resultContainer').innerHTML = `
+            <div class="success-message">
+                ✅ 메시지를 성공적으로 조회했습니다.
+            </div>
+            <div class="message-card">
+                <div class="message-header">
+                    <div class="info-item">
+                        <div class="info-label">Stream Name</div>
+                        <div class="info-value">${escapeHtml(streamName)}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Message ID</div>
+                        <div class="info-value">${escapeHtml(actualId)}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Timestamp</div>
+                        <div class="info-value">
+                            ${isValidDate ? timestamp.toISOString() : 'N/A'}
+                            ${isValidDate ? `<br><small style="color: #999;">(${timestamp.toLocaleString('ko-KR')})</small>` : ''}
+                        </div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Field Count</div>
+                        <div class="info-value">${Object.keys(fields).length} fields</div>
+                    </div>
+                </div>
+
+                <div class="fields-section">
+                    <div class="fields-title">
+                        📋 Message Fields
+                        <button class="copy-btn" onclick="MSG.copyToClipboard()">📋 JSON 복사</button>
+                    </div>
+                    ${fieldsHtml || '<div style="color: #999; padding: 12px 0;">No fields</div>'}
+                </div>
+
+                <div class="fields-section" style="margin-top: 24px;">
+                    <div class="fields-title">🔍 Raw JSON</div>
+                    <div class="json-viewer">${escapeHtml(jsonStr)}</div>
+                </div>
+            </div>
+        `;
+    }
+
+    MSG.copyToClipboard = function() {
+        if (!currentMessage) return;
+
+        const jsonStr = JSON.stringify(currentMessage, null, 2);
+
+        navigator.clipboard.writeText(jsonStr).then(() => {
+            alert('✅ JSON이 클립보드에 복사되었습니다!');
+        }).catch(err => {
+            console.error('복사 실패:', err);
+            alert('❌ 복사에 실패했습니다. 콘솔을 확인해주세요.');
+        });
+    };
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    // 엔터키로 검색
+    document.addEventListener('DOMContentLoaded', () => {
+        document.getElementById('messageId').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                MSG.search();
+            }
+        });
+    });
+})();
+</script>
+</body>
+</html>
+

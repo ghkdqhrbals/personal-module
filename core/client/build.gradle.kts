@@ -117,6 +117,7 @@ dependencies {
     implementation("org.jsoup:jsoup:1.17.2")
     implementation("org.springframework.boot:spring-boot-starter-data-redis")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
+    implementation("io.micrometer:micrometer-registry-prometheus")
     // Apache HttpClient for RestClient connection pooling (version managed by Spring Boot BOM)
     implementation("org.apache.httpcomponents.client5:httpclient5")
     implementation("org.apache.httpcomponents.core5:httpcore5")

@@ -114,5 +114,14 @@ class WebController(
 
         return "recommendations"
     }
-}
 
+    @GetMapping("/monitoring")
+    fun monitoring(): String {
+        return "monitoring"
+    }
+
+    @GetMapping("/monitoring2")
+    fun monitoring2(): String {
+        return "monitoring2"
+    }
+}

@@ -52,6 +52,7 @@ class EventService(
                 }
             )
         )
+
         // eventId를 포함한 새 이벤트 반환
         return when (event) {
             is SagaCommandEvent -> event.copy(eventId = eventId)

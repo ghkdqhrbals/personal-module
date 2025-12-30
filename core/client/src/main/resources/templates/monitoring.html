@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8"/>
+    <title>Redis Stream Messages</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 20px; }
+        table { border-collapse: collapse; width: 100%; margin-top: 16px; }
+        th, td { border: 1px solid #ccc; padding: 6px; vertical-align: top; }
+        th { background: #f5f5f5; font-weight: 600; }
+        pre { margin: 0; white-space: pre-wrap; }
+        input[type="text"], input[type="number"] {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-right: 8px;
+        }
+        button {
+            padding: 8px 16px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 8px;
+        }
+        button:hover { background: #45a049; }
+        button:disabled { background: #ccc; cursor: not-allowed; }
+        .search-section {
+            background: #f9f9f9;
+            padding: 16px;
+            border-radius: 6px;
+            margin-bottom: 16px;
+        }
+        .search-row { margin-bottom: 12px; }
+        .pagination-controls { margin: 12px 0; display: flex; align-items: center; gap: 12px; }
+        #rs_pageInfo { padding: 0 12px; font-weight: 500; }
+        .hint { font-size: 12px; color: #666; margin-top: 4px; }
+        .message-box {
+            padding: 12px 16px;
+            border-radius: 4px;
+            margin-bottom: 16px;
+            display: none;
+        }
+        .message-box.show {
+            display: block;
+        }
+        .message-box.info {
+            background: #e3f2fd;
+            border-left: 4px solid #2196F3;
+            color: #1976d2;
+        }
+        .message-box.warning {
+            background: #fff3cd;
+            border-left: 4px solid #ff9800;
+            color: #856404;
+        }
+        .message-box.success {
+            background: #d4edda;
+            border-left: 4px solid #4CAF50;
+            color: #155724;
+        }
+    </style>
+</head>
+<body>
+<h3>📊 Redis Stream Messages Viewer</h3>
+
+<div id="rs_messageBox" class="message-box"></div>
+
+<div class="search-section">
+    <div class="search-row">
+        <input id="rs_stream" placeholder="Stream 이름 (예: summary:1)" style="width: 300px;"/>
+        <input id="rs_pageSize" type="number" value="5" min="1" max="100" style="width: 80px;" placeholder="페이지 크기"/>
+        <button onclick="RS.query()">🔍 처음부터 조회</button>
+    </div>
+    <div class="search-row">
+        <input id="rs_cursorId" placeholder="Cursor ID (예: 1735541234567-0)" style="width: 300px;"/>
+        <button onclick="RS.queryWithCursor()">➡️ Cursor부터 조회</button>
+        <button onclick="RS.clearCursor()" style="background: #ff9800;">🗑️ Cursor 초기화</button>
+    </div>
+    <div class="hint">
+        💡 Tip: Cursor ID를 입력하면 해당 위치부터 조회를 시작합니다. 비워두면 처음부터 조회합니다.
+    </div>
+</div>
+
+<div class="pagination-controls">
+    <button onclick="RS.prev()" id="rs_prevBtn">⬅️ Prev</button>
+    <span id="rs_pageInfo"></span>
+    <button onclick="RS.next()" id="rs_nextBtn">Next ➡️</button>
+</div>
+
+<table>
+    <thead>
+    <tr>
+        <th>ID</th>
+        <th>Timestamp</th>
+        <th>Fields</th>
+    </tr>
+    </thead>
+    <tbody id="rs_tbody"></tbody>
+</table>
+
+<script>
+    (function () {
+        // ===== namespace 고정 =====
+        const RS = {};
+        window.RS = RS;
+
+        // ===== 상태 (전역 충돌 방지) =====
+        let curPage = 1;
+        let curPageSize = 5;
+        let totalPages = 1;
+
+        // page별 시작 cursor (1페이지는 null)
+        const pageCursor = { 1: null };
+
+        // ===== 메시지 표시 함수 =====
+        function showMessage(message, type = 'info') {
+            const messageBox = document.getElementById('rs_messageBox');
+            messageBox.textContent = message;
+            messageBox.className = `message-box show ${type}`;
+
+            // 3초 후 자동 숨김
+            setTimeout(() => {
+                messageBox.className = 'message-box';
+            }, 3000);
+        }
+
+        // ===== API =====
+        RS.query = function () {
+            curPage = 1;
+            curPageSize = Number(document.getElementById("rs_pageSize").value);
+            Object.keys(pageCursor).forEach(k => delete pageCursor[k]);
+            pageCursor[1] = null;
+            document.getElementById("rs_cursorId").value = ''; // cursor 입력 필드 초기화
+            load('reset');
+        };
+
+        RS.queryWithCursor = function () {
+            const cursorId = document.getElementById("rs_cursorId").value.trim();
+            if (!cursorId) {
+                showMessage('⚠️ Cursor ID를 입력해주세요.', 'warning');
+                return;
+            }
+
+            curPage = 1;
+            curPageSize = Number(document.getElementById("rs_pageSize").value);
+            Object.keys(pageCursor).forEach(k => delete pageCursor[k]);
+            pageCursor[1] = cursorId;
+            load('reset');
+        };
+
+        RS.clearCursor = function () {
+            document.getElementById("rs_cursorId").value = '';
+            showMessage('🗑️ Cursor가 초기화되었습니다.', 'info');
+            RS.query();
+        };
+
+        RS.next = function () {
+            if (!pageCursor[curPage + 1]) return;
+            curPage++;
+            load('next');
+        };
+
+        RS.prev = function () {
+            if (curPage <= 1) return;
+            curPage--;
+            load('prev');
+        };
+
+        async function load(mode) { // reset | next | prev
+            const stream = document.getElementById("rs_stream").value.trim();
+            if (!stream) {
+                showMessage('⚠️ Stream 이름을 입력해주세요.', 'warning');
+                return;
+            }
+
+            curPageSize = Number(document.getElementById("rs_pageSize").value);
+
+            const cursor = pageCursor[curPage] ?? null;
+
+            const url = new URL(
+                `http://localhost:7070/monitoring/streams/messages/${encodeURIComponent(stream)}`
+            );
+            if (cursor) url.searchParams.set("cursor", cursor);
+            url.searchParams.set("pageSize", curPageSize);
+
+            console.log("REQUEST:", url.toString());
+            console.log("Current Page:", curPage, "Cursor:", cursor);
+
+            try {
+                const res = await fetch(url);
+                if (!res.ok) {
+                    render([]);
+                    setButtons(true, true, `HTTP ${res.status}: ${res.statusText}`);
+                    showMessage(`❌ 오류: HTTP ${res.status} - ${res.statusText}`, 'warning');
+                    return;
+                }
+
+                const data = await res.json();
+                totalPages = Math.max(1, Math.ceil((data.totalCount ?? 0) / curPageSize));
+                render(data.messages ?? []);
+
+                // prev 로드에서는 다음 cursor를 절대 덮어쓰지 않음
+                if (mode !== 'prev') {
+                    if (data.hasMore && data.nextCursor) {
+                        pageCursor[curPage + 1] = data.nextCursor;
+                        console.log("Next cursor saved:", data.nextCursor);
+                    }
+                }
+
+                setButtons(curPage <= 1, !pageCursor[curPage + 1], `Page ${curPage} / ${totalPages} (Total: ${data.totalCount ?? 0})`);
+
+
+            } catch (error) {
+                console.error('Fetch error:', error);
+                render([]);
+                setButtons(true, true, `Error: ${error.message}`);
+                showMessage(`❌ 요청 실패: ${error.message}`, 'warning');
+            }
+        }
+
+        function setButtons(prevDisabled, nextDisabled, info) {
+            document.getElementById("rs_prevBtn").disabled = prevDisabled;
+            document.getElementById("rs_nextBtn").disabled = nextDisabled;
+            document.getElementById("rs_pageInfo").textContent = info;
+        }
+
+        function render(messages) {
+            const tbody = document.getElementById("rs_tbody");
+            tbody.innerHTML = "";
+
+            if (!messages || messages.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="3" style="text-align: center; padding: 20px; color: #999;">📭 메시지가 없습니다</td></tr>';
+                return;
+            }
+
+            messages.forEach(m => {
+                const tr = document.createElement("tr");
+
+                // ID를 클릭하면 cursor 입력 필드에 복사
+                const idCell = document.createElement("td");
+                idCell.innerHTML = `<a href="#" onclick="RS.copyCursor('${m.id}'); return false;" style="color: #2196F3; text-decoration: none;">${m.id}</a>`;
+                idCell.title = "클릭하여 Cursor ID로 설정";
+
+                const timestampCell = document.createElement("td");
+                const date = new Date(m.timestamp);
+                timestampCell.innerHTML = `
+                    ${date.toISOString()}<br>
+                    <small style="color: #666;">${date.toLocaleString('ko-KR')}</small>
+                `;
+
+                const fieldsCell = document.createElement("td");
+                fieldsCell.innerHTML = `<pre>${JSON.stringify(m.fields, null, 2)}</pre>`;
+
+                tr.appendChild(idCell);
+                tr.appendChild(timestampCell);
+                tr.appendChild(fieldsCell);
+                tbody.appendChild(tr);
+            });
+        }
+
+        RS.copyCursor = function(id) {
+            document.getElementById("rs_cursorId").value = id;
+            showMessage(`✅ Cursor ID가 설정되었습니다: ${id}`, 'success');
+        };
+
+        // 엔터키로 검색
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('rs_stream').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') RS.query();
+            });
+            document.getElementById('rs_cursorId').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') RS.queryWithCursor();
+            });
+        });
+    })();
+</script>
+</body>
+</html>

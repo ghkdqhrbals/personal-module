@@ -24,15 +24,18 @@ services:
 #      retries: 3
 #      start_period: 90s
 
-  grafana:
-    image: grafana/grafana:latest
-    container_name: grafana
-    restart: unless-stopped
+  redis:
+    image: redis:7.0.11-alpine
+    container_name: redis
     ports:
-      - "3000:3000"
+      - "6379:6379"
     volumes:
-      - ./grafana_data:/var/lib/grafana
-
+      - redis_datas:/data
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
   db:
     image: arm64v8/mysql:8.0.32
     container_name: mysql
@@ -61,7 +64,8 @@ services:
 volumes:
   ollama_data:
     driver: local
-  redis_data:
+  redis_datas:
     driver: local
   grafana_data:
     driver: local
+
