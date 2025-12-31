@@ -1,11 +1,17 @@
 package org.ghkdqhrbals.client.domain.monitoring
 
+import com.fasterxml.jackson.core.type.TypeReference
+import com.fasterxml.jackson.databind.ObjectMapper
+import org.ghkdqhrbals.client.config.log.logger
+import org.ghkdqhrbals.model.config.Jackson
 import org.ghkdqhrbals.model.monitoring.GroupInfo
 import org.ghkdqhrbals.model.monitoring.StreamMessage
 import org.ghkdqhrbals.model.monitoring.StreamMessageResponse
 import org.springframework.data.redis.connection.stream.PendingMessagesSummary
 import org. springframework. data. domain. Range
 import org.springframework.data.redis.connection.Limit
+import org.springframework.data.redis.connection.ReturnType
+import org.springframework.data.redis.core.ScanOptions
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.stereotype.Service
 
@@ -119,6 +125,13 @@ class RedisStreamMonitoringService(
             totalCount = totalCount
         )
     }
+    fun getStreamPartitionInfo(key: String, maxPartition: Long = 100): List<String>? {
+        val options = ScanOptions.scanOptions().match("$key:*").count(maxPartition).build()
+        return redisTemplate.execute { conn ->
+            conn.scan(options).asSequence().map { String(it) }.toList()
+        } ?: emptyList()
+
+    }
 
 
     fun getMessage(streamKey: String, messageId: String): Map<String, String>? {
@@ -139,16 +152,81 @@ class RedisStreamMonitoringService(
         }
         return map
     }
+    data class GroupLag(val name: String, val lag: Long?, val pending: Long?, val consumers: Long?)
+
+    private val script = """
+        local stream = KEYS[1]
+        local groups = redis.call('XINFO','GROUPS',stream)
+        local result = {}
+        for _, group in ipairs(groups) do
+          local groupInfo = {}
+          for i = 1, #group, 2 do
+            local key = group[i]
+            local value = group[i + 1]
+            groupInfo[key] = value
+          end
+          table.insert(result, {
+            name = groupInfo['name'],
+            lag = groupInfo['lag'],
+            pending = groupInfo['pending'],
+            consumers = groupInfo['consumers']
+          })
+        end
+        return cjson.encode(result)
+    """.trimIndent()
+
+    fun fetchLag(stream: String, om: ObjectMapper): List<GroupLag> {
+        return try {
+            @Suppress("DEPRECATION")
+            val result: Any? = redisTemplate.execute { conn ->
+                conn.eval(script.toByteArray(), ReturnType.VALUE, 1, stream.toByteArray())
+            }
+
+            // ByteArray를 String으로 변환
+            val jsonString = when (result) {
+                is ByteArray -> String(result, Charsets.UTF_8)
+                is String -> result
+                else -> {
+                    logger().warn("Unexpected result type: {}", result?.javaClass?.name)
+                    "[]"
+                }
+            }
+
+            logger().info("Raw Lua script result: {}", jsonString)
+
+
+            val parsed = om.readValue(jsonString, object : TypeReference<List<GroupLag>>() {})
+            logger().info("Parsed GroupLag list: {}", parsed)
+
+            parsed
+        } catch (e: Exception) {
+            logger().error("Error fetching lag from Redis: {}", e.message, e)
+            emptyList()
+        }
+    }
+
 
     fun getStreamGroups(streamKey: String): List<GroupInfo>? {
         val groups = redisTemplate.execute { it.streamCommands().xInfoGroups(streamKey.toByteArray()) }
-        val execute = groups?.mapNotNull {
-            val from = GroupInfo.from(it)
-            from.apply {
-                if (this != null) {
-                    val consumers = getConsumers(streamKey, this.name)
-                    this.consumerInfo = consumers ?: emptyList()
-                }
+
+        // Lua 스크립트로 lag 정보 조회
+        val om = Jackson.getMapper()
+        val lagList = fetchLag(streamKey, om)
+        val lagMap = lagList.associateBy { it.name }
+
+        logger().info("Stream: {}, Fetched lag info: {}", streamKey, lagMap)
+
+        val execute = groups?.mapNotNull { xInfoGroup ->
+            val groupName = xInfoGroup.groupName()
+            val lagInfo = lagMap[groupName]
+            val lag = lagInfo?.lag ?: 0L
+
+            logger().info("Group: {}, lagInfo: {}, final lag: {}", groupName, lagInfo, lag)
+
+            val from = GroupInfo.from(xInfoGroup, lag)
+            from?.apply {
+                val consumers = getConsumers(streamKey, this.name)
+                this.consumerInfo = consumers ?: emptyList()
             }
 
             from
@@ -172,7 +250,7 @@ class RedisStreamMonitoringService(
 
     fun getStreamInfo(streamKey: String):  org.ghkdqhrbals.model.monitoring.StreamInfo? {
         val execute = redisTemplate.execute { it.streamCommands().xInfo(streamKey.toByteArray()) }
-        val from = org.ghkdqhrbals.model.monitoring.StreamInfo.from(execute)
+        val from = org.ghkdqhrbals.model.monitoring.StreamInfo.from(streamKey, execute)
         return from
     }
 }

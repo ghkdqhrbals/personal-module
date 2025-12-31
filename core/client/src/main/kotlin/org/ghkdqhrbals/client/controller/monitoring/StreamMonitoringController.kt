@@ -5,6 +5,7 @@ import org.springframework.web.bind.annotation.*
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.tags.Tag
 import io.swagger.v3.oas.annotations.Parameter
+import org.ghkdqhrbals.model.monitoring.StreamInfo
 import org.ghkdqhrbals.model.monitoring.StreamMessageResponse
 
 @RestController
@@ -13,7 +14,7 @@ import org.ghkdqhrbals.model.monitoring.StreamMessageResponse
 class StreamMonitoringController(
     private val streamMonitoringService: RedisStreamMonitoringService
 ) {
-    @GetMapping("/info/{stream}")
+    @GetMapping("/{stream}/info")
     @Operation(summary = "Stream 정보 조회", description = "Redis Stream의 상세 정보를 조회합니다")
     fun getStreamInfo(
         @PathVariable
@@ -21,7 +22,7 @@ class StreamMonitoringController(
         stream: String,
     ) = streamMonitoringService.getStreamInfo(stream)
 
-    @GetMapping("/groups/{stream}")
+    @GetMapping("/{stream}/groups")
     @Operation(summary = "Stream 그룹 정보 조회", description = "Redis Stream의 그룹 정보를 조회합니다")
     fun getStreamGroups(
         @PathVariable
@@ -29,7 +30,7 @@ class StreamMonitoringController(
         stream: String,
     ) = streamMonitoringService.getStreamGroups(stream)
 
-    @GetMapping("/messages/{stream}")
+    @GetMapping("/{stream}/messages")
     @Operation(
         summary = "Stream 메시지 페이지네이션 조회",
         description = """
@@ -59,7 +60,7 @@ class StreamMonitoringController(
     }
 
 
-    @GetMapping("/message/{stream}/{id}")
+    @GetMapping("/{stream}/messages/{id}")
     @Operation(
         summary = "단일 메시지 조회",
         description = """
@@ -78,4 +79,21 @@ class StreamMonitoringController(
         @Parameter(description = "메시지 ID (timestamp-sequence 형식)", example = "1735541234567-0")
         id: String,
     ) = streamMonitoringService.getMessage(stream, id)
+
+    @GetMapping("/{stream}/infos")
+    @Operation(summary = "Stream 파티션 정보 포함 전체 Stream 조회. 이떄 ':' 를 delimiter 로 쿼리합니다.", description = "Redis Stream의 파티션별 정보를 조회합니다")
+    fun getPartitionInfo(
+        @PathVariable
+        @Parameter(description = "조회할 Stream 이름")
+        stream: String,
+    ):List<StreamInfo> {
+        val partitionKeys = streamMonitoringService.getStreamPartitionInfo(stream)
+        val list = mutableListOf<StreamInfo>()
+        partitionKeys?.forEach { key ->
+            streamMonitoringService.getStreamInfo(key)?.run {
+                list.add(this)
+            }
+        }
+        return list
+    }
 }

@@ -124,4 +124,9 @@ class WebController(
     fun monitoring2(): String {
         return "monitoring2"
     }
+
+    @GetMapping("/monitoring3")
+    fun monitoring3(): String {
+        return "monitoring3"
+    }
 }

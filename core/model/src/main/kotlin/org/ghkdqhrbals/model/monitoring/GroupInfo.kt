@@ -4,16 +4,18 @@ data class GroupInfo(
     val name: String,
     val consumers: Long,
     val pending: Long,
+    val lag: Long = 0L,
     var consumerInfo: List<ConsumerInfo> = emptyList(),
     val lastDeliveredId: String
 ) {
     companion object {
-        fun from(xInfoGroup: org.springframework.data.redis.connection.stream.StreamInfo.XInfoGroup?): GroupInfo? {
+        fun from(xInfoGroup: org.springframework.data.redis.connection.stream.StreamInfo.XInfoGroup?, lag: Long = 0L): GroupInfo? {
             return xInfoGroup?.let {
                 GroupInfo(
                     name = it.groupName(),
                     consumers = it.consumerCount(),
                     pending = it.pendingCount(),
+                    lag = lag,
                     lastDeliveredId = it.lastDeliveredId()
                 )
             }

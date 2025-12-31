@@ -5,7 +5,7 @@ plugins {
     id("io.spring.dependency-management") version "1.1.7"
     id("maven-publish")
     id("jacoco")
-    kotlin("kapt") version "1.9.25"
+    kotlin("kapt")
 }
 
 group = "org.ghkdqhrbals"
