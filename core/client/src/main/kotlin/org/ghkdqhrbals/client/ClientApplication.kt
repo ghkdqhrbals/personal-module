@@ -5,11 +5,13 @@ import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.autoconfigure.domain.EntityScan
 import org.springframework.boot.runApplication
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories
+import org.springframework.scheduling.annotation.EnableScheduling
 import kotlin.system.exitProcess
 
 @SpringBootApplication
 @EntityScan("org.ghkdqhrbals.client.domain")
 @EnableJpaRepositories("org.ghkdqhrbals.client.domain")
+@EnableScheduling
 class ClientApplication
 
 fun main(args: Array<String>) {

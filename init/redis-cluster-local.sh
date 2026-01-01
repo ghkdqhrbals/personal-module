@@ -12,61 +12,48 @@ is_running() {
   lsof -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1
 }
 
-echo "[STEP] start redis nodes if not running"
 for p in "${PORTS[@]}"; do
   if is_running "$p"; then
     echo "[SKIP] redis $p already running"
     continue
   fi
 
+  NODE_DATA_DIR="$DATA_DIR/$p"
+  mkdir -p "$NODE_DATA_DIR"
+
   CONF="$CONF_DIR/redis-$p.conf"
-  if [ ! -f "$CONF" ]; then
 cat > "$CONF" <<EOF
 port $p
 bind 127.0.0.1
 protected-mode no
+
 cluster-enabled yes
 cluster-config-file nodes-$p.conf
 cluster-node-timeout 5000
+
 appendonly yes
 appendfsync everysec
+aof-use-rdb-preamble yes
+
+dir $NODE_DATA_DIR
+save ""
+
 maxmemory 1gb
 maxmemory-policy allkeys-lru
 
-aof-use-rdb-preamble yes
-dir $DATA_DIR
-save ""
 stream-node-max-bytes 4096
 stream-node-max-entries 100
 EOF
-  fi
 
   echo "[START] redis $p"
-  redis-server "$CONF" &
+  redis-server "$CONF" >"$NODE_DATA_DIR/redis.log" 2>&1 &
 done
 
-sleep 2
-
-echo "[STEP] check cluster state"
-CLUSTER_OK=false
-for p in "${PORTS[@]}"; do
-  if redis-cli -p "$p" cluster info >/dev/null 2>&1; then
-    if redis-cli -p "$p" cluster info | grep -q "cluster_state:ok"; then
-      CLUSTER_OK=true
-      break
-    fi
-  fi
-done
-
-if $CLUSTER_OK; then
-  echo "[SKIP] cluster already initialized"
-  exit 0
-fi
+echo "[WAIT] redis startup"
+sleep 5
 
 echo "[INIT] cluster create"
 redis-cli --cluster create \
 127.0.0.1:9001 127.0.0.1:9002 127.0.0.1:9003 \
 127.0.0.1:9004 127.0.0.1:9005 127.0.0.1:9006 \
 --cluster-replicas 1 --cluster-yes
-
-echo "[DONE] cluster initialized"

@@ -5,8 +5,10 @@ import org.springframework.web.bind.annotation.*
 import io.swagger.v3.oas.annotations.Operation
 import io.swagger.v3.oas.annotations.tags.Tag
 import io.swagger.v3.oas.annotations.Parameter
+import jakarta.validation.constraints.Max
 import org.ghkdqhrbals.model.monitoring.StreamInfo
 import org.ghkdqhrbals.model.monitoring.StreamMessageResponse
+import org.springframework.validation.annotation.Validated
 
 @RestController
 @RequestMapping("/monitoring/streams")
@@ -30,6 +32,7 @@ class StreamMonitoringController(
         stream: String,
     ) = streamMonitoringService.getStreamGroups(stream)
 
+    @Validated
     @GetMapping("/{stream}/messages")
     @Operation(
         summary = "Stream 메시지 페이지네이션 조회",
@@ -45,7 +48,7 @@ class StreamMonitoringController(
             2. GET /messages/mystream?cursor=1234567890-0&pageSize=10 (다음 페이지)
         """
     )
-    fun getMessage(
+    fun getMessages(
         @PathVariable
         @Parameter(description = "조회할 Stream 이름")
         stream: String,
@@ -53,8 +56,10 @@ class StreamMonitoringController(
         @Parameter(description = "페이지네이션 커서 (null이면 처음부터 조회)")
         cursor: String? = null,
         @RequestParam(defaultValue = "10")
-        @Parameter(description = "페이지당 메시지 수 (1-100, 기본값: 10)")
+        @Parameter(description = "페이지당 메시지 수 (기본값: 10, 최대값: 1000)")
+        @Max(1000)
         pageSize: Int = 10
+
     ): StreamMessageResponse {
         return streamMonitoringService.getMessagesWithPagination(stream, cursor, pageSize)
     }

@@ -81,7 +81,7 @@ dependencies {
     // thymeleaf
     implementation("org.springframework.batch:spring-batch-infrastructure")
     implementation("org.springframework.batch:spring-batch-core")
-
+    implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-quartz")
     implementation("org.springframework.boot:spring-boot-starter-thymeleaf")
     implementation("nz.net.ultraq.thymeleaf:thymeleaf-layout-dialect:3.3.0")

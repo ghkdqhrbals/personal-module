@@ -8,7 +8,7 @@ import org.ghkdqhrbals.model.monitoring.GroupInfo
 import org.ghkdqhrbals.model.monitoring.StreamMessage
 import org.ghkdqhrbals.model.monitoring.StreamMessageResponse
 import org.springframework.data.redis.connection.stream.PendingMessagesSummary
-import org. springframework. data. domain. Range
+import org.springframework.data.domain.Range
 import org.springframework.data.redis.connection.Limit
 import org.springframework.data.redis.connection.ReturnType
 import org.springframework.data.redis.core.ScanOptions
@@ -48,10 +48,12 @@ class RedisStreamMonitoringService(
         } ?: emptyList()
     }
 
+    // ...existing code...
+
     /**
-     * 페이지네이션을 지원하는 메시지 조회
+     * 페이지네이션을 지원하는 메시지 조회 (최신 메시지부터 역순)
      * @param streamKey Redis Stream 키
-     * @param cursor 현재 커서 (null이면 처음부터, "-"는 가장 오래된 메시지부터)
+     * @param cursor 현재 커서 (null이면 처음부터, "+"는 가장 최신 메시지부터)
      * @param pageSize 페이지당 메시지 수 (기본 10, 최대 100)
      * @return StreamMessageResponse (메시지 리스트, 다음 커서, 더보기 여부)
      */
@@ -60,17 +62,25 @@ class RedisStreamMonitoringService(
         cursor: String?,
         pageSize: Int
     ): StreamMessageResponse {
-        val actualPageSize = pageSize.coerceIn(1, 100)
-        val startCursor = cursor ?: "-" // null이면 처음부터
+        val actualPageSize = pageSize
 
-        // 총 메시지 개수 조회
         val totalCount = getStreamLength(streamKey).toInt()
 
-        // 실제로는 pageSize + 1 개를 조회하여 다음 페이지가 있는지 확인
+        // xRevRange: descending order (최신 → 오래된)
+        // Range.of(Bound, Bound)를 사용하여 명시적으로 순서 지정
+        val range = if (cursor == null) {
+            // 최신(+)부터 가장 오래된(-)까지
+            Range.closed("+", "-")
+        } else {
+            // cursor보다 오래된 메시지들
+            // cursor(exclusive upper bound) ~ -(inclusive lower bound)
+            Range.rightOpen("-", cursor)
+        }
+
         val messages = redisTemplate.execute { conn ->
-            conn.streamCommands().xRange(
+            conn.streamCommands().xRevRange(
                 streamKey.toByteArray(),
-                Range.closed(startCursor, "+"),
+                range,
                 Limit.limit().count(actualPageSize + 1)
             )
         }
@@ -84,7 +94,6 @@ class RedisStreamMonitoringService(
             )
         }
 
-        // pageSize보다 많이 조회되면 다음 페이지가 있다는 의미
         val hasMore = messages.size > actualPageSize
         val messageList = if (hasMore) {
             messages.take(actualPageSize)
@@ -92,12 +101,9 @@ class RedisStreamMonitoringService(
             messages
         }
 
-        // 다음 커서는 마지막 메시지의 ID보다 큰 값
+        // nextCursor는 실제로 표시된 마지막 메시지의 ID
         val nextCursor = if (hasMore) {
-            // Redis Stream ID는 "timestamp-sequence" 형식
-            // 마지막 메시지의 ID를 다음 커서로 사용하되, exclusive하게 처리하기 위해
-            // 다음 메시지 ID를 사용
-            messages[actualPageSize].id.value
+            messageList.last().id.value
         } else {
             null
         }
@@ -134,7 +140,7 @@ class RedisStreamMonitoringService(
     }
 
 
-    fun getMessage(streamKey: String, messageId: String): Map<String, String>? {
+    fun getMessage(streamKey: String, messageId: String): StreamMessage? {
         val messages = redisTemplate.execute { conn ->
             conn.streamCommands().xRange(
                 streamKey.toByteArray(),
@@ -145,12 +151,18 @@ class RedisStreamMonitoringService(
 
         val record = messages?.firstOrNull() ?: return null
 
-        val map = mutableMapOf<String, String>()
-        map["id"] = record.id.value
+        val fields = mutableMapOf<String, String>()
         record.value.forEach { (key, value) ->
-            map[key.decodeToString()] = value.decodeToString()
+            fields[key.decodeToString()] = value.decodeToString()
         }
-        return map
+
+        val timestamp = record.id.value.split("-")[0].toLongOrNull() ?: 0L
+
+        return StreamMessage(
+            id = record.id.value,
+            timestamp = timestamp,
+            fields = fields
+        )
     }
     data class GroupLag(val name: String, val lag: Long?, val pending: Long?, val consumers: Long?)
 
@@ -192,11 +204,7 @@ class RedisStreamMonitoringService(
                 }
             }
 
-            logger().info("Raw Lua script result: {}", jsonString)
-
-
             val parsed = om.readValue(jsonString, object : TypeReference<List<GroupLag>>() {})
-            logger().info("Parsed GroupLag list: {}", parsed)
 
             parsed
         } catch (e: Exception) {
@@ -214,14 +222,10 @@ class RedisStreamMonitoringService(
         val lagList = fetchLag(streamKey, om)
         val lagMap = lagList.associateBy { it.name }
 
-        logger().info("Stream: {}, Fetched lag info: {}", streamKey, lagMap)
-
         val execute = groups?.mapNotNull { xInfoGroup ->
             val groupName = xInfoGroup.groupName()
             val lagInfo = lagMap[groupName]
             val lag = lagInfo?.lag ?: 0L
-
-            logger().info("Group: {}, lagInfo: {}, final lag: {}", groupName, lagInfo, lag)
 
             val from = GroupInfo.from(xInfoGroup, lag)
             from?.apply {

@@ -3,6 +3,25 @@
 <head>
     <meta charset="utf-8"/>
     <title>Redis Stream Messages</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 16px; }
+        h3 { margin-bottom: 16px; font-size: 16px; }
+        div { margin-bottom: 12px; }
+        input { padding: 6px 8px; border: 1px solid #ddd; border-radius: 3px; margin-right: 8px; font-size: 13px; }
+        input:focus { outline: none; border-color: #666; }
+        button { padding: 6px 12px; background: #3f7ee9; color: white; border: none; border-radius: 3px; cursor: pointer; margin-right: 4px; font-size: 13px; }
+        button:hover { background: #2860c7; }
+        button:disabled { background: #999; cursor: not-allowed; }
+        #rs_pageInfo { margin: 0 12px; font-size: 13px; }
+        table { border-collapse: collapse; width: 100%; margin-top: 12px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 13px; }
+        th { font-weight: 600; }
+        pre { margin: 0; font-size: 12px; white-space: pre-wrap; word-wrap: break-word; }
+        a { color: #3f7ee9; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        small { display: block; color: #666; margin-top: 4px; font-size: 12px; }
+    </style>
 </head>
 <body>
 <h3>Redis Stream Messages</h3>
@@ -14,9 +33,8 @@
 </div>
 
 <div style="margin-top:8px;">
-    <input id="rs_cursorId" placeholder="Cursor ID (ex: 1735541234567-0)" style="width:260px;"/>
-    <button onclick="RS.queryWithCursor()">Query from Cursor</button>
-    <button onclick="RS.clearCursor()">Clear Cursor</button>
+    <input id="rs_messageId" placeholder="Message ID (ex: 1735541234567-0)" style="width:260px;"/>
+    <button onclick="RS.search()">Search</button>
 </div>
 
 <div style="margin:12px 0;">
@@ -42,30 +60,42 @@
 
         let curPage = 1;
         let curPageSize = 5;
+        let totalPages = 1;
         const pageCursor = { 1: null };
 
         RS.query = function () {
             curPage = 1;
+            totalPages = 1;
             curPageSize = Number(document.getElementById("rs_pageSize").value);
             Object.keys(pageCursor).forEach(k => delete pageCursor[k]);
             pageCursor[1] = null;
-            document.getElementById("rs_cursorId").value = '';
+            document.getElementById("rs_messageId").value = '';
             load('reset');
         };
 
-        RS.queryWithCursor = function () {
-            const cursorId = document.getElementById("rs_cursorId").value.trim();
-            if (!cursorId) return;
-            curPage = 1;
-            curPageSize = Number(document.getElementById("rs_pageSize").value);
-            Object.keys(pageCursor).forEach(k => delete pageCursor[k]);
-            pageCursor[1] = cursorId;
-            load('reset');
-        };
+        RS.search = async function () {
+            const stream = document.getElementById("rs_stream").value.trim();
+            const messageId = document.getElementById("rs_messageId").value.trim();
 
-        RS.clearCursor = function () {
-            document.getElementById("rs_cursorId").value = '';
-            RS.query();
+            if (!stream || !messageId) {
+                alert('Stream name and Message ID are required');
+                return;
+            }
+
+            try {
+                const url = `http://localhost:7070/monitoring/streams/${encodeURIComponent(stream)}/messages/${encodeURIComponent(messageId)}`;
+                const res = await fetch(url);
+
+                if (!res.ok) {
+                    alert(`HTTP ${res.status}: ${res.statusText}`);
+                    return;
+                }
+
+                const data = await res.json();
+                renderSingleMessage(data, messageId);
+            } catch (error) {
+                alert(`Error: ${error.message}`);
+            }
         };
 
         RS.next = function () {
@@ -94,7 +124,7 @@
             const res = await fetch(url);
             if (!res.ok) {
                 render([]);
-                setButtons(true, true, `HTTP ${res.status}`);
+                setButtons(true, true, `Page ${curPage}`);
                 return;
             }
 
@@ -105,10 +135,13 @@
                 pageCursor[curPage + 1] = data.nextCursor;
             }
 
+            // 전체 페이지 계산
+            totalPages = Math.max(1, Math.ceil((data.totalCount ?? 0) / curPageSize));
+
             setButtons(
                 curPage <= 1,
                 !pageCursor[curPage + 1],
-                `Page ${curPage} (Total ${data.totalCount ?? 0})`
+                `Page ${curPage} / ${totalPages} (Total: ${data.totalCount ?? 0})`
             );
         }
 
@@ -131,10 +164,13 @@
                 const tr = document.createElement("tr");
 
                 const idTd = document.createElement("td");
-                idTd.innerHTML = `<a href="#" onclick="RS.copyCursor('${m.id}');return false;">${m.id}</a>`;
+                idTd.innerHTML = `<a href="#" onclick="RS.fillMessageId('${m.id}');return false;">${m.id}</a>`;
 
                 const tsTd = document.createElement("td");
-                tsTd.textContent = new Date(m.timestamp).toISOString();
+                const date = new Date(m.timestamp);
+                const isoString = date.toISOString();
+                const kstString = date.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
+                tsTd.innerHTML = `${isoString}<br><small>${kstString}</small>`;
 
                 const fieldsTd = document.createElement("td");
                 fieldsTd.innerHTML = `<pre>${JSON.stringify(m.fields, null, 2)}</pre>`;
@@ -146,8 +182,33 @@
             });
         }
 
-        RS.copyCursor = function (id) {
-            document.getElementById("rs_cursorId").value = id;
+        function renderSingleMessage(data, id) {
+            const tbody = document.getElementById("rs_tbody");
+            tbody.innerHTML = "";
+
+            const tr = document.createElement("tr");
+
+            const idTd = document.createElement("td");
+            idTd.textContent = id;
+
+            const tsTd = document.createElement("td");
+            const timestamp = id.split("-")[0];
+            const date = new Date(parseInt(timestamp));
+            const isoString = date.toISOString();
+            const kstString = date.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
+            tsTd.innerHTML = `${isoString}<br><small>${kstString}</small>`;
+
+            const fieldsTd = document.createElement("td");
+            fieldsTd.innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+
+            tr.appendChild(idTd);
+            tr.appendChild(tsTd);
+            tr.appendChild(fieldsTd);
+            tbody.appendChild(tr);
+        }
+
+        RS.fillMessageId = function (id) {
+            document.getElementById("rs_messageId").value = id;
         };
     })();
 </script>
