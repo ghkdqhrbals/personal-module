@@ -1,5 +1,10 @@
 package org.ghkdqhrbals.client.config
 
+import io.lettuce.core.RedisURI
+import io.lettuce.core.cluster.RedisClusterClient
+import io.lettuce.core.cluster.api.StatefulRedisClusterConnection
+import io.lettuce.core.codec.ByteArrayCodec
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -15,9 +20,12 @@ import org.springframework.data.redis.serializer.StringRedisSerializer
 @Configuration
 @ConditionalOnProperty(
     name = ["spring.redis.host"],
-    matchIfMissing = false
+    matchIfMissing = false,
 )
-class RedisConfig {
+class RedisConfig(
+    @Value("\${redis.cluster.nodes}") private val nodes: List<String>,
+    @Value("\${redis.timeout}") private val timeout: Int
+) {
 
     @Bean
     fun stringRedisTemplate(connectionFactory: RedisConnectionFactory): StringRedisTemplate = StringRedisTemplate().apply {
@@ -28,4 +36,15 @@ class RedisConfig {
         hashValueSerializer = StringRedisSerializer()
         afterPropertiesSet()
     }
+//
+//    @Bean(destroyMethod = "shutdown")
+//    fun redisClusterClient(): RedisClusterClient =
+//        RedisClusterClient.create(nodes.map { RedisURI.create(it) })
+//
+//    /** ★ XAUTOCLAIM 전용 단일 커넥션 */
+//    @Bean(destroyMethod = "close")
+//    fun redisClusterConnection(
+//        redisClusterClient: RedisClusterClient
+//    ): StatefulRedisClusterConnection<ByteArray, ByteArray> =
+//        redisClusterClient.connect(ByteArrayCodec.INSTANCE)
 }

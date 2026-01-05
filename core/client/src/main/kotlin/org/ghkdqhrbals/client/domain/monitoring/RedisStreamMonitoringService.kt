@@ -10,15 +10,42 @@ import org.ghkdqhrbals.model.monitoring.StreamMessageResponse
 import org.springframework.data.redis.connection.stream.PendingMessagesSummary
 import org.springframework.data.domain.Range
 import org.springframework.data.redis.connection.Limit
+import org.springframework.data.redis.connection.RedisClusterConnection
+import org.springframework.data.redis.connection.RedisStandaloneConfiguration
 import org.springframework.data.redis.connection.ReturnType
+import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory
 import org.springframework.data.redis.core.ScanOptions
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.stereotype.Service
+import java.util.concurrent.ConcurrentHashMap
+
+inline fun Long.toHumanBytes(): String {
+    if (this <= 0) return "0B"
+    val units = arrayOf("B", "K", "M", "G", "T")
+    var value = this.toDouble()
+    var idx = 0
+
+    while (value >= 1024 && idx < units.lastIndex) {
+        value /= 1024
+        idx++
+    }
+    return String.format("%.2f%s", value, units[idx])
+}
 
 @Service
 class RedisStreamMonitoringService(
     private val redisTemplate: StringRedisTemplate
 ) {
+    private val nodeFactoryCache =
+        ConcurrentHashMap<String, LettuceConnectionFactory>()
+
+    private fun getOrCreateFactory(host: String, port: Int): LettuceConnectionFactory =
+        nodeFactoryCache.computeIfAbsent("$host:$port") {
+            LettuceConnectionFactory(
+                RedisStandaloneConfiguration(host, port)
+            ).apply { afterPropertiesSet() }
+        }
+
     fun getStreamLength(streamKey: String): Long =
         redisTemplate.execute { it.streamCommands().xLen(streamKey.toByteArray()) } ?: 0L
 
@@ -46,6 +73,187 @@ class RedisStreamMonitoringService(
             }
             map
         } ?: emptyList()
+    }
+
+    data class MemoryUsageInfo(
+        val streamKeyMemory: Long,
+        val maxMemory: Long,
+        val usagePercentage: Double,
+        val nodeId: String? = null,
+        val nodeAddress: String? = null
+    )
+
+    data class NodeMemoryInfo(
+        val nodeId: String,
+        val host: String,
+        val port: Int,
+        val maxMemory: Long,
+        val usedMemory: Long,
+        val usedMemoryHuman: String,
+        val maxMemoryHuman: String,
+        val memoryUsagePercentage: Double,
+        val streamMemorySizeHuman: String,
+        val streamBytes: Long
+    )
+
+    fun infoByKeyNode(streamKey: String): NodeMemoryInfo? {
+        return try {
+            val slot = io.lettuce.core.cluster.SlotHash.getSlot(streamKey)
+            val clusterConnection = redisTemplate.connectionFactory?.let {
+                if (it is LettuceConnectionFactory) {
+                    it.getClusterConnection()
+                } else {
+                    null
+                }
+            } ?: run {
+                // 클러스터가 아닌 경우 일반 연결에서 정보 조회
+                logger().debug("Not a cluster connection, trying standalone info")
+                return getStandaloneNodeMemoryInfo(streamKey)
+            }
+
+            // 슬롯을 담당하는 노드 찾기
+            var targetNodeInfo: NodeMemoryInfo? = null
+
+            clusterConnection.clusterGetNodes().forEach { node ->
+                if (node.servesSlot(slot)) {
+                    logger().debug("Found node serving slot {} for key {}: {}:{}", slot, streamKey, node.host, node.port)
+                    val factory = getOrCreateFactory(node.host!!, node.port!!)
+
+                    factory.connection.use { conn ->
+                        val infoMemory = conn.execute("INFO", "memory".toByteArray())
+                        val infoServer = conn.execute("INFO", "server".toByteArray())
+
+                        val memoryInfo = when (infoMemory) {
+                            is ByteArray -> String(infoMemory, Charsets.UTF_8)
+                            is String -> infoMemory
+                            else -> ""
+                        }
+
+                        val serverInfo = when (infoServer) {
+                            is ByteArray -> String(infoServer, Charsets.UTF_8)
+                            is String -> infoServer
+                            else -> ""
+                        }
+
+                        val script = "return redis.call('MEMORY','USAGE', KEYS[1])"
+                        val streamBytes = (conn.eval(
+                            script.toByteArray(),
+                            ReturnType.INTEGER,
+                            1,
+                            streamKey.toByteArray()
+                        ) as? Long) ?: 0L
+
+
+                        targetNodeInfo = parseMemoryInfo(memoryInfo, serverInfo, node.host!!, node.port!!, streamBytes)
+                    }
+                }
+            }
+
+            targetNodeInfo ?: run {
+                logger().warn("No node serves the slot for key: {}", streamKey)
+                null
+            }
+        } catch (e: Exception) {
+            logger().error("Error fetching node memory info for key {}: {}", streamKey, e.message, e)
+            null
+        }
+    }
+
+    private fun getStandaloneNodeMemoryInfo(streamKey: String): NodeMemoryInfo? {
+        return try {
+            val infoMemory = redisTemplate.execute { conn ->
+                val result = conn.execute("INFO", "memory".toByteArray()) as? ByteArray
+                result?.let { String(it, Charsets.UTF_8) }
+            }
+
+            val infoServer = redisTemplate.execute { conn ->
+                val result = conn.execute("INFO", "server".toByteArray()) as? ByteArray
+                result?.let { String(it, Charsets.UTF_8) }
+            }
+
+            // streamBytes 조회
+            val streamBytes = redisTemplate.execute { conn ->
+                try {
+                    val debugObj = conn.execute("DEBUG", "OBJECT".toByteArray(), streamKey.toByteArray())
+                    val debugStr = when (debugObj) {
+                        is ByteArray -> String(debugObj, Charsets.UTF_8)
+                        is String -> debugObj
+                        else -> ""
+                    }
+                    debugStr.substringAfter("serializedlength:", "")
+                        .substringBefore(" ")
+                        .toLongOrNull() ?: 0L
+                } catch (e: Exception) {
+                    logger().debug("Failed to get stream bytes: {}", e.message)
+                    0L
+                }
+            } ?: 0L
+
+            val factory = redisTemplate.connectionFactory as LettuceConnectionFactory
+            val host = factory.standaloneConfiguration.hostName
+            val port = factory.standaloneConfiguration.port
+
+            if (infoMemory != null && infoServer != null) {
+                parseMemoryInfo(infoMemory, infoServer, host, port, streamBytes)
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            logger().error("Error fetching standalone node memory info: {}", e.message, e)
+            null
+        }
+    }
+
+    private fun parseMemoryInfo(memoryInfo: String, serverInfo: String, host: String, port: Int, streamBytes: Long = 0L): NodeMemoryInfo? {
+        return try {
+            var maxMemory = 0L
+            var usedMemory = 0L
+            var usedMemoryHuman = ""
+            var maxMemoryHuman = ""
+            var nodeId = "unknown"
+
+            // Memory info 파싱
+            memoryInfo.split("\r\n").forEach { line ->
+                when {
+                    line.startsWith("maxmemory:") -> maxMemory = line.substringAfter(":").trim().toLongOrNull() ?: 0L
+                    line.startsWith("used_memory:") -> usedMemory = line.substringAfter(":").trim().toLongOrNull() ?: 0L
+                    line.startsWith("used_memory_human:") -> usedMemoryHuman = line.substringAfter(":").trim()
+                    line.startsWith("maxmemory_human:") -> maxMemoryHuman = line.substringAfter(":").trim()
+                }
+            }
+
+            // Server info 파싱 (nodeId)
+            serverInfo.split("\r\n").forEach { line ->
+                if (line.startsWith("run_id:")) {
+                    nodeId = line.substringAfter(":").trim()
+                }
+            }
+
+            val memoryUsagePercentage = if (maxMemory > 0) {
+                (usedMemory.toDouble() / maxMemory.toDouble()) * 100.0
+            } else {
+                0.0
+            }
+
+            logger().debug("Parsed node info: host={}, port={}, maxMemory={}, usedMemory={}, percentage={}, streamBytes={}",
+                host, port, maxMemory, usedMemory, memoryUsagePercentage, streamBytes)
+
+            NodeMemoryInfo(
+                nodeId = nodeId,
+                host = host,
+                port = port,
+                maxMemory = maxMemory,
+                usedMemory = usedMemory,
+                usedMemoryHuman = usedMemoryHuman,
+                maxMemoryHuman = maxMemoryHuman,
+                memoryUsagePercentage = memoryUsagePercentage,
+                streamBytes = streamBytes,
+                streamMemorySizeHuman = streamBytes.toHumanBytes()
+            )
+        } catch (e: Exception) {
+            logger().error("Error parsing memory info: {}", e.message, e)
+            null
+        }
     }
 
     // ...existing code...
@@ -164,7 +372,12 @@ class RedisStreamMonitoringService(
             fields = fields
         )
     }
-    data class GroupLag(val name: String, val lag: Long?, val pending: Long?, val consumers: Long?)
+    data class GroupLag(
+        val name: String,
+        val lag: Long? = null,
+        val pending: Long? = null,
+        val consumers: Long? = null
+    )
 
     private val script = """
         local stream = KEYS[1]
@@ -177,11 +390,26 @@ class RedisStreamMonitoringService(
             local value = group[i + 1]
             groupInfo[key] = value
           end
+          local lagValue = groupInfo['lag']
+          local pendingValue = groupInfo['pending']
+          local consumersValue = groupInfo['consumers']
+          
+          -- null이거나 false인 값을 0으로 변환
+          if not lagValue or lagValue == false then
+            lagValue = 0
+          end
+          if not pendingValue or pendingValue == false then
+            pendingValue = 0
+          end
+          if not consumersValue or consumersValue == false then
+            consumersValue = 0
+          end
+          
           table.insert(result, {
             name = groupInfo['name'],
-            lag = groupInfo['lag'],
-            pending = groupInfo['pending'],
-            consumers = groupInfo['consumers']
+            lag = lagValue,
+            pending = pendingValue,
+            consumers = consumersValue
           })
         end
         return cjson.encode(result)
@@ -204,9 +432,19 @@ class RedisStreamMonitoringService(
                 }
             }
 
-            val parsed = om.readValue(jsonString, object : TypeReference<List<GroupLag>>() {})
+            logger().debug("Lua script returned for stream {}: {}", stream, jsonString)
 
-            parsed
+            try {
+                val parsed = om.readValue(jsonString, object : TypeReference<List<GroupLag>>() {})
+                parsed.forEach { lag ->
+                    logger().debug("Stream {} group {} - lag: {}, pending: {}, consumers: {}",
+                        stream, lag.name, lag.lag, lag.pending, lag.consumers)
+                }
+                parsed
+            } catch (e: Exception) {
+                logger().error("Error deserializing lag data from JSON: {} | JSON: {}", e.message, jsonString, e)
+                emptyList()
+            }
         } catch (e: Exception) {
             logger().error("Error fetching lag from Redis: {}", e.message, e)
             emptyList()

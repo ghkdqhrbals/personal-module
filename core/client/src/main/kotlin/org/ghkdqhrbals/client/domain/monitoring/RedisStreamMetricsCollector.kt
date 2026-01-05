@@ -2,7 +2,9 @@ package org.ghkdqhrbals.client.domain.monitoring
 
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
+import org.ghkdqhrbals.client.config.listener.RedisStreamConfiguration
 import org.ghkdqhrbals.client.config.log.logger
+import org.ghkdqhrbals.client.domain.stream.SummaryStreamConfig
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 import java.util.concurrent.ConcurrentHashMap
@@ -17,11 +19,7 @@ class RedisStreamMetricsCollector(
     private val meterRegistry: MeterRegistry
 ) {
 
-    private val monitoringStreams = listOf(
-        "summary:1",
-        "summary:2",
-        "summary:3"
-    )
+    private val monitoringStreams = SummaryStreamConfig.getAllStreamKeys()
 
     // 메트릭 값을 저장하는 맵
     private val streamLengthMap = ConcurrentHashMap<String, AtomicLong>()
@@ -31,12 +29,21 @@ class RedisStreamMetricsCollector(
     private val consumerPendingMap = ConcurrentHashMap<String, AtomicLong>()
     private val consumerIdleMap = ConcurrentHashMap<String, AtomicLong>()
 
+    // 메모리 관련 메트릭 맵
+    private val streamMemoryMap = ConcurrentHashMap<String, AtomicLong>()
+    private val streamMaxMemoryMap = ConcurrentHashMap<String, AtomicLong>()
+    private val streamMemoryPercentageMap = ConcurrentHashMap<String, Double>()
+
+    init {
+        logger().info("Initialized RedisStreamMetricsCollector for streams: $monitoringStreams")
+    }
     /**
      * 1초마다 Redis Stream 메트릭 수집 (테스트용, 프로덕션은 10초 권장)
      */
-    @Scheduled(fixedDelay = 10000, initialDelay = 5000)
+    @Scheduled(fixedDelay = 1000, initialDelay = 5000)
     fun collectStreamMetrics() {
         try {
+            logger().info("Collecting Redis Stream metrics...")
             monitoringStreams.forEach { streamKey ->
                 collectMetricsForStream(streamKey)
             }
@@ -49,8 +56,78 @@ class RedisStreamMetricsCollector(
         try {
             collectStreamInfo(streamKey)
             collectGroupInfo(streamKey)
+            collectMemoryUsage(streamKey)
         } catch (e: Exception) {
             logger().error("Error collecting metrics for stream {}: {}", streamKey, e.message)
+        }
+    }
+
+    private fun collectMemoryUsage(streamKey: String) {
+        try {
+            val nodeMemoryInfo = streamMonitoringService.infoByKeyNode(streamKey) ?: return
+
+            logger().debug("Stream {} node memory info: nodeId={}, host={}, port={}, maxMemory={}, usedMemory={}, percentage={}",
+                streamKey, nodeMemoryInfo.nodeId, nodeMemoryInfo.host, nodeMemoryInfo.port,
+                nodeMemoryInfo.maxMemory, nodeMemoryInfo.usedMemory, nodeMemoryInfo.memoryUsagePercentage)
+
+            val nodeLabel = "${nodeMemoryInfo.host}:${nodeMemoryInfo.port}"
+
+            // Stream이 저장된 노드 정보 (info 메트릭)
+            Gauge.builder("redis_stream_node", 1) { 1.0 }
+                .tag("stream", streamKey)
+                .tag("node_id", nodeMemoryInfo.nodeId)
+                .tag("host", nodeMemoryInfo.host)
+                .tag("port", nodeMemoryInfo.port.toString())
+                .description("Redis Stream node location information")
+                .register(meterRegistry)
+
+            // Stream의 노드 사용 메모리 (바이트)
+            val streamMemoryHolder = streamMemoryMap.computeIfAbsent(streamKey) { key ->
+                val holder = AtomicLong(0)
+                Gauge.builder("redis_node_used_memory_bytes", holder) { it.get().toDouble() }
+                    .tag("stream", key)
+                    .tag("node_id", nodeMemoryInfo.nodeId)
+                    .tag("node_address", nodeLabel)
+                    .description("Used memory of the Redis node hosting this stream in bytes")
+                    .register(meterRegistry)
+                holder
+            }
+            streamMemoryHolder.set(nodeMemoryInfo.usedMemory)
+
+            // Redis 노드의 최대 메모리 설정
+            val maxMemoryHolder = streamMaxMemoryMap.computeIfAbsent(streamKey) { key ->
+                val holder = AtomicLong(0)
+                Gauge.builder("redis_node_max_memory_bytes", holder) { it.get().toDouble() }
+                    .tag("stream", key)
+                    .tag("node_id", nodeMemoryInfo.nodeId)
+                    .tag("node_address", nodeLabel)
+                    .description("Max memory configuration of the Redis node")
+                    .register(meterRegistry)
+                holder
+            }
+            maxMemoryHolder.set(nodeMemoryInfo.maxMemory)
+
+            // 메모리 사용률 (%) - Gauge 직접 등록
+            streamMemoryPercentageMap.computeIfAbsent(streamKey) { key ->
+                Gauge.builder("redis_node_memory_usage_percentage") { nodeMemoryInfo.memoryUsagePercentage }
+                    .tag("stream", key)
+                    .tag("node_id", nodeMemoryInfo.nodeId)
+                    .tag("node_address", nodeLabel)
+                    .description("Memory usage percentage of the Redis node")
+                    .register(meterRegistry)
+                nodeMemoryInfo.memoryUsagePercentage
+            }
+
+
+            // Stream 바이트 크기 메트릭 추가
+            Gauge.builder("redis_stream_bytes", nodeMemoryInfo) { nodeMemoryInfo.streamBytes.toDouble() }
+                .tag("stream", streamKey)
+                .tag("node_id", nodeMemoryInfo.nodeId)
+                .tag("node_address", nodeLabel)
+                .description("Serialized length of the Redis Stream in bytes")
+                .register(meterRegistry)
+        } catch (e: Exception) {
+            logger().error("Error collecting memory usage for {}: {}", streamKey, e.message, e)
         }
     }
 

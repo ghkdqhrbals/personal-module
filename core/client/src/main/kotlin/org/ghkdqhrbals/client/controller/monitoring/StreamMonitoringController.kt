@@ -101,4 +101,14 @@ class StreamMonitoringController(
         }
         return list
     }
+
+    @GetMapping("/{stream}/memory")
+    @Operation(summary = "Stream 메모리 사용량 조회", description = "Redis Stream이 위치한 노드의 메모리 정보를 조회합니다")
+    fun getMemoryUsage(
+        @PathVariable
+        @Parameter(description = "조회할 Stream 이름")
+        stream: String,
+    ) = streamMonitoringService.infoByKeyNode(stream)
+
+    // 그런데 실제 계산과 일치하지 않는게, PEL 내 정보 및 consumer, offset 등의 정보들 크기도 반영되어야해서...
 }
