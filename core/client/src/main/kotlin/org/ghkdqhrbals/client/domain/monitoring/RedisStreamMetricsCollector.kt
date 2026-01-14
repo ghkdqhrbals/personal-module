@@ -2,9 +2,8 @@ package org.ghkdqhrbals.client.domain.monitoring
 
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
-import org.ghkdqhrbals.client.config.listener.RedisStreamConfiguration
 import org.ghkdqhrbals.client.config.log.logger
-import org.ghkdqhrbals.client.domain.stream.SummaryStreamConfig
+import org.ghkdqhrbals.client.domain.stream.StreamConfigManager
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Component
 import java.util.concurrent.ConcurrentHashMap
@@ -16,10 +15,19 @@ import java.util.concurrent.atomic.AtomicLong
 @Component
 class RedisStreamMetricsCollector(
     private val streamMonitoringService: RedisStreamMonitoringService,
-    private val meterRegistry: MeterRegistry
+    private val meterRegistry: MeterRegistry,
+    private val manager: StreamConfigManager
 ) {
 
-    private val monitoringStreams = SummaryStreamConfig.getAllStreamKeys()
+    private val monitoringStreams = list()
+    private fun list(): List<String> {
+        val list = mutableListOf<String>()
+        val allStreamKeys = manager.cachedSummaryConfig.getAllStreamKeys()?: emptyList()
+        val allCdlKeys = manager.cachedSummaryConfig.getAllCdlKeys()?: emptyList()
+        list.addAll(allStreamKeys)
+        list.addAll(allCdlKeys)
+        return list.distinct()
+    }
 
     // 메트릭 값을 저장하는 맵
     private val streamLengthMap = ConcurrentHashMap<String, AtomicLong>()
@@ -40,10 +48,9 @@ class RedisStreamMetricsCollector(
     /**
      * 1초마다 Redis Stream 메트릭 수집 (테스트용, 프로덕션은 10초 권장)
      */
-    @Scheduled(fixedDelay = 1000, initialDelay = 5000)
+    @Scheduled(fixedDelay = 1000, initialDelay = 1000)
     fun collectStreamMetrics() {
         try {
-            logger().info("Collecting Redis Stream metrics...")
             monitoringStreams.forEach { streamKey ->
                 collectMetricsForStream(streamKey)
             }
@@ -168,8 +175,6 @@ class RedisStreamMetricsCollector(
 
             groups.forEach { group ->
                 val groupKey = "$streamKey:${group.name}"
-                logger().debug("Group {}: consumers={}, pending={}, lag={}",
-                    groupKey, group.consumers, group.pending, group.lag)
 
                 // Consumer 수
                 val consumersHolder = groupConsumersMap.computeIfAbsent(groupKey) { key ->

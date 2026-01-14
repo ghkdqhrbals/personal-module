@@ -1,7 +1,7 @@
 package org.ghkdqhrbals.client.config.listener
 
 import org.ghkdqhrbals.client.config.log.logger
-import org.ghkdqhrbals.client.domain.stream.SummaryStreamConfig
+import org.ghkdqhrbals.client.domain.stream.StreamConfigManager
 import org.ghkdqhrbals.message.redis.ConditionalOnRedisStreamEnabled
 import org.springframework.context.annotation.Configuration
 import org.springframework.data.redis.connection.stream.Consumer
@@ -21,22 +21,24 @@ import kotlin.concurrent.thread
 class RedisStreamConfiguration(
     private val redisStreamListener: RedisStreamListener,
     private val redisTemplate: StringRedisTemplate,
+    private val manager: StreamConfigManager,
 ) {
     @Volatile
     private var container: StreamMessageListenerContainer<String, ObjectRecord<String, String>>? = null
     private val myNodeId: String = PodContext.id
     companion object {
-        const val STREAM_KEY_PREFIX = SummaryStreamConfig.STREAM_KEY_PREFIX
-        const val MAX_PARTITIONS = 100L
-        const val POLL_BATCH_SIZE: Int = 1
-        const val CONSUMER_GROUP_NAME = SummaryStreamConfig.CONSUMER_GROUP_NAME
+        const val CONSUMER_GROUP_NAME = "summary-group"
     }
+    var summaryConfig = manager.cachedSummaryConfig
 
-    init { initListener() }
+    init {
+        initListener()
+    }
 
     private fun initListener() {
         // find stream keys with prefix summary:
-        val keyPartitions = redisTemplate.scan(ScanOptions.scanOptions().match("$STREAM_KEY_PREFIX*").count(MAX_PARTITIONS).build()).stream().toList()
+        val keyPartitions = summaryConfig.getAllStreamKeys()
+        val allCdlKeys = summaryConfig.getAllCdlKeys()
         logger().info("발견된 샤딩 파티션 키: $keyPartitions")
 
         // 각 stream에 대해 consumer group 생성
@@ -57,7 +59,7 @@ class RedisStreamConfiguration(
         val options = StreamMessageListenerContainer.StreamMessageListenerContainerOptions.builder()
             .targetType(String::class.java)
             .pollTimeout(Duration.ofMillis(1000))
-            .batchSize(POLL_BATCH_SIZE)
+            .batchSize(summaryConfig.pollBatchSize)
             .errorHandler { t ->
                 logger().error("Stream listener error", t)
                 scheduleReconnect()
@@ -75,6 +77,15 @@ class RedisStreamConfiguration(
                 redisStreamListener,
             )
         }
+        allCdlKeys.forEach { cdlKey ->
+            logger().info("Registering CDL listener for stream '$cdlKey' with consumer ID '$myNodeId'")
+            listenerContainer.receive(
+                Consumer.from(CONSUMER_GROUP_NAME, PodContext.id),
+                StreamOffset.create(cdlKey, ReadOffset.from(">")),
+                redisStreamListener,
+            )
+        }
+
         listenerContainer.start()
     }
     private fun scheduleReconnect() {

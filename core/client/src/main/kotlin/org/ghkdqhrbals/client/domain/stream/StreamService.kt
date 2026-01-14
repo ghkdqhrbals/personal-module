@@ -4,7 +4,6 @@ import io.lettuce.core.Consumer
 import io.lettuce.core.XAutoClaimArgs
 import io.lettuce.core.cluster.api.async.RedisAdvancedClusterAsyncCommands
 import io.lettuce.core.models.stream.ClaimedMessages
-import org.ghkdqhrbals.client.config.scheduler.RedisStreamScheduler.Companion.RETRY_INTERVAL_MS
 import org.springframework.context.annotation.Profile
 import org.springframework.data.domain.Range
 import org.springframework.data.redis.connection.stream.PendingMessage
@@ -12,12 +11,14 @@ import org.springframework.data.redis.connection.stream.RecordId
 import org.springframework.data.redis.connection.stream.StreamRecords
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.stereotype.Component
+import java.time.Duration
 
 @Component
 @Profile("!test")
 class StreamService(
     private val redisTemplate: StringRedisTemplate,
 ) {
+
     fun ackDel(topic: String, group: String, recordId: String) {
         ack(topic, group, recordId)
         delete(topic, recordId)
@@ -31,10 +32,14 @@ class StreamService(
         redisTemplate.opsForStream<String, String>().delete(key, recordId)
     }
 
-    fun save(key: String, payload: Any): RecordId? {
+    fun send(key: String, payload: Any): RecordId? {
         return redisTemplate.opsForStream<String, String>().add(
             StreamRecords.newRecord().`in`(key).ofObject(payload),
         )
+    }
+
+    fun trim(key: String, payload: Any, maxLen: Long) {
+        redisTemplate.opsForStream<String, String>().trim(key, maxLen)
     }
 
     fun autoClaim(
@@ -42,13 +47,15 @@ class StreamService(
         groupName: String,
         consumerName: String,
         count: Long,
+        minIdleTimeMs: Long,
     ): ClaimedMessages<ByteArray, ByteArray> {
         return redisTemplate.execute { conn ->
             val native = conn.nativeConnection
+            @Suppress("UNCHECKED_CAST")
             val commands = native as RedisAdvancedClusterAsyncCommands<ByteArray, ByteArray>
 
             val consumer = Consumer.from(groupName.toByteArray(), consumerName.toByteArray())
-            val args = XAutoClaimArgs.Builder.xautoclaim(consumer, RETRY_INTERVAL_MS, "0-0").count(count)
+            val args = XAutoClaimArgs.Builder.xautoclaim(consumer, Duration.ofMillis(minIdleTimeMs), "0-0").count(count)
 
             commands.xautoclaim(streamKey.toByteArray(), args).get()
         }!!

@@ -1,5 +1,6 @@
 package org.ghkdqhrbals.client.config.listener
 
+import org.ghkdqhrbals.client.ai.LlmClient
 import org.ghkdqhrbals.client.config.log.logger
 import org.ghkdqhrbals.client.domain.stream.StreamService
 import org.ghkdqhrbals.message.redis.ConditionalOnRedisStreamEnabled
@@ -14,7 +15,8 @@ import org.springframework.stereotype.Component
 @ConditionalOnRedisStreamEnabled
 class  RedisStreamListener(
     private val redisTemplate: StringRedisTemplate,
-    private val streamService: StreamService
+    private val streamService: StreamService,
+    private val llmClient: LlmClient
 ) : StreamListener<String, ObjectRecord<String, String>> {
 
     override fun onMessage(message: ObjectRecord<String, String>) {
@@ -32,7 +34,9 @@ class  RedisStreamListener(
         recordId: String,
         message: ObjectRecord<String, String>,
     ) {
-        Thread.sleep(1000)
+        // 1~1000 사이의 랜덤한 숫자 생성
+        val randomNum = (1..1000).random()
+        Thread.sleep(randomNum.toLong())
 
 //        ackDel(
 //            topic = message.stream!!,
