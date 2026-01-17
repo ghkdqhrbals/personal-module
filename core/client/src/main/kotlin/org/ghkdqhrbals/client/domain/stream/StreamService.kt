@@ -32,14 +32,21 @@ class StreamService(
         redisTemplate.opsForStream<String, String>().delete(key, recordId)
     }
 
-    fun send(key: String, payload: Any): RecordId? {
+    fun send(topic: String, payload: Any): RecordId? {
         return redisTemplate.opsForStream<String, String>().add(
-            StreamRecords.newRecord().`in`(key).ofObject(payload),
+            StreamRecords.newRecord().`in`(topic).ofObject(payload),
         )
     }
 
-    fun trim(key: String, payload: Any, maxLen: Long) {
-        redisTemplate.opsForStream<String, String>().trim(key, maxLen)
+    fun send(topic: String, key:String, payload: Any): RecordId? {
+        key
+        return redisTemplate.opsForStream<String, String>().add(
+            StreamRecords.newRecord().`in`(topic).ofObject(payload),
+        )
+    }
+
+    fun trim(topic: String, payload: Any, maxLen: Long) {
+        redisTemplate.opsForStream<String, String>().trim(topic, maxLen)
     }
 
     fun autoClaim(

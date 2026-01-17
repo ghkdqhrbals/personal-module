@@ -1,5 +1,6 @@
 package org.ghkdqhrbals.client.config.listener
 
+import kotlinx.coroutines.runBlocking
 import org.ghkdqhrbals.client.ai.LlmClient
 import org.ghkdqhrbals.client.config.log.logger
 import org.ghkdqhrbals.client.domain.stream.StreamService
@@ -35,18 +36,27 @@ class  RedisStreamListener(
         message: ObjectRecord<String, String>,
     ) {
         // 1~1000 사이의 랜덤한 숫자 생성
-        val randomNum = (1..1000).random()
-        Thread.sleep(randomNum.toLong())
+//        val randomNum = (1..1000).random()
+//        Thread.sleep(randomNum.toLong())
+        // 1초 ~ 10초 사이 sleep 하도록
+        runBlocking {
+            val summary = llmClient.summarizePaper(
+                abstract = message.value,
+                maxLength = 150
+            )
+
+            logger().info("Generated summary: $summary")
+        }
 
 //        ackDel(
 //            topic = message.stream!!,
 //            group = RedisStreamConfiguration.CONSUMER_GROUP_NAME,
 //            recordId = recordId,
 //        )
-//        ack(
-//            topic = message.stream!!,
-//            group = RedisStreamConfiguration.CONSUMER_GROUP_NAME,
-//            recordId = recordId,
-//        )
+        streamService.ack(
+            key = message.stream!!,
+            group = RedisStreamConfiguration.CONSUMER_GROUP_NAME,
+            recordId = recordId,
+        )
     }
 }

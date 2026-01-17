@@ -6,7 +6,6 @@ import org.ghkdqhrbals.client.ai.LlmClient
 import org.ghkdqhrbals.client.domain.paper.service.ArxivService
 import org.ghkdqhrbals.client.domain.stream.StreamService
 import org.ghkdqhrbals.message.event.EventPublisher
-import org.ghkdqhrbals.model.paper.SummaryEvent
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.*
 import java.util.*
@@ -45,7 +44,7 @@ class PaperController(
         val eventId = UUID.randomUUID().toString()
         search.forEach() {
             streamService.send(
-                key = "summary:0",
+                topic = "summary:0",
                 payload = it.toSummaryEvent(eventId)
             )
         }
