@@ -14,9 +14,9 @@ jobs:
         uses: actions/checkout@v4
       - name: Make runner.sh executable
         run: chmod +x etc/runner.sh
-      - name: Setup Docker Buildx
-        run: |
-          docker buildx use default
+#      - name: Setup Docker Buildx
+#        run: |
+#          docker buildx use default
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
