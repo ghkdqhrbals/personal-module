@@ -18,7 +18,7 @@ jobs:
         run: |
           docker buildx install
           if ! docker buildx ls | grep -q mybuilder; then
-            docker buildx create --name mybuilder
+            docker buildx create --driver docker --name mybuilder
           fi
           docker buildx use mybuilder
 
