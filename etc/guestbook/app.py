@@ -17,7 +17,7 @@ app.add_middleware(
         "http://127.0.0.1:4000",
         "https://ghkdqhrbals.github.io",
     ],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
