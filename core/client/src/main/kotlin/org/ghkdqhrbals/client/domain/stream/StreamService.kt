@@ -64,14 +64,15 @@ class StreamService(
         }
     }
 
-    fun ackDel(topic: String, group: String, recordId: String) {
+    suspend fun ackDel(topic: String, group: String, recordId: String) {
         ack(topic, group, recordId)
         delete(topic, recordId)
     }
 
-    fun ack(key: String, group: String, recordId: String) {
+    suspend fun  ack(key: String, group: String, recordId: String) {
         redisTemplate.opsForStream<String, String>().acknowledge(key, group, recordId)
     }
+
 
     fun delete(key: String, recordId: String) {
         redisTemplate.opsForStream<String, String>().delete(key, recordId)

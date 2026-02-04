@@ -14,13 +14,13 @@ jobs:
         uses: actions/checkout@v4
       - name: Make runner.sh executable
         run: chmod +x etc/runner.sh
-      - name: Install Docker Buildx
-        run: |
-          docker buildx install
-          if ! docker buildx ls | grep -q mybuilder; then
-            docker buildx create --driver docker --name mybuilder
-          fi
-          docker buildx use mybuilder
+#      - name: Install Docker Buildx
+#        run: |
+#          docker buildx install
+#          if ! docker buildx ls | grep -q mybuilder; then
+#            docker buildx create --driver docker --name mybuilder
+#          fi
+#          docker buildx use mybuilder
 
       - name: Run Docker Compose
         run: |

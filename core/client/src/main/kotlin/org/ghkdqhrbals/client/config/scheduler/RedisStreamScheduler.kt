@@ -1,5 +1,6 @@
 package org.ghkdqhrbals.client.config.scheduler
 
+import kotlinx.coroutines.runBlocking
 import org.ghkdqhrbals.client.config.listener.PodContext
 import org.ghkdqhrbals.client.config.log.logger
 import org.ghkdqhrbals.client.domain.monitoring.RedisStreamMonitoringService
@@ -358,7 +359,7 @@ class RedisStreamScheduler(
                             // CDL stream으로 이동
                             streamService.send(manager.cachedSummaryConfig.getCdlStreamKey(streamKey), msg.body)
                         }
-                        streamService.ackDel(streamKey, groupName, msg.id.toString())
+                        runBlocking {  streamService.ackDel(streamKey, groupName, msg.id.toString()) }
 
                         logger().warn("Deleted message {} from stream {} group {} after {} delivery attempts (maxRetryCount: {})",
                             msg.id, streamKey, groupName, totalDeliveryCount, maxRetryCount)
