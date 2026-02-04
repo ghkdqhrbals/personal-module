@@ -17,8 +17,11 @@ jobs:
       - name: Install Docker Buildx
         run: |
           docker buildx install
-          docker buildx create --use --name mybuilder
+          if ! docker buildx ls | grep -q mybuilder; then
+            docker buildx create --name mybuilder
+          fi
           docker buildx use mybuilder
+
       - name: Run Docker Compose
         run: |
           ./etc/runner.sh etc/guestbook/docker-compose.yaml
