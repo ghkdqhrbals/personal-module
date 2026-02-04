@@ -12,6 +12,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+      - name: Make runner.sh executable
+        run: chmod +x etc/runner.sh
       - name: Run Docker Compose
         run: |
           ./etc/runner.sh etc/guestbook/docker-compose.yaml
