@@ -1,0 +1,17 @@
+name: CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, home]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Run Docker Compose
+        run: |
+          ./etc/runner.sh etc/guestbook/docker-compose.yaml
