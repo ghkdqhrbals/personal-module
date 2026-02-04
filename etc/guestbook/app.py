@@ -12,8 +12,12 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     # CORS origins must be scheme + host + optional port (no path).
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origins=[
+        "http://localhost:4000",
+        "http://127.0.0.1:4000",
+        "https://ghkdqhrbals.github.io",
+    ],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
