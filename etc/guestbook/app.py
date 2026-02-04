@@ -15,6 +15,7 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:4000",
         "http://127.0.0.1:4000",
+        "https://ghkdqhrbals.github.io/portfolio",
         "https://ghkdqhrbals.github.io",
     ],
     allow_credentials=True,
