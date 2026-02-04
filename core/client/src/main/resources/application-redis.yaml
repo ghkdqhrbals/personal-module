@@ -1,0 +1,52 @@
+---
+spring:
+  config:
+    activate:
+      on-profile: local
+  redis:
+    stream:
+      enabled: true
+  data:
+    redis:
+      client-type: lettuce
+      timeout: 3000ms
+      cluster:
+        nodes:
+          - localhost:9001
+          - localhost:9002
+          - localhost:9003
+          - localhost:9004
+          - localhost:9005
+          - localhost:9006
+      lettuce:
+        pool:
+          max-active: 16
+          max-idle: 8
+          min-idle: 2
+          max-wait: 2000ms
+---
+spring:
+  config:
+    activate:
+      on-profile: dev
+  redis:
+    stream:
+      enabled: true
+  data:
+    redis:
+      client-type: lettuce
+      timeout: 3000ms
+      cluster:
+        nodes:
+          - localhost:9001
+          - localhost:9002
+          - localhost:9003
+          - localhost:9004
+          - localhost:9005
+          - localhost:9006
+      lettuce:
+        pool:
+          max-active: 16
+          max-idle: 8
+          min-idle: 2
+          max-wait: 2000ms

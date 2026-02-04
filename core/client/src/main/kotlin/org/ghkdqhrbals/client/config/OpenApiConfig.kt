@@ -15,6 +15,11 @@ class OpenApiConfig {
         .group("client-api")
         .pathsToMatch("/api/**")
         .build()
+    @Bean
+    fun monitoringGroup(): GroupedOpenApi = GroupedOpenApi.builder()
+        .group("monitoring")
+        .pathsToMatch("/monitoring/**")
+        .build()
 
     @Bean
     fun customOpenAPI(

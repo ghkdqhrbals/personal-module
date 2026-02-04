@@ -9,15 +9,11 @@ include(
     ":client",
     ":message",
     ":batch",
-    ":orchestrator",
-    ":api",
     ":model",
     ":repository",
 )
 
 project(":client").projectDir = file("core/client")
-project(":api").projectDir = file("core/api")
-project(":orchestrator").projectDir = file("core/orchestrator")
 project(":message").projectDir = file("core/message")
 project(":model").projectDir = file("core/model")
 project(":repository").projectDir = file("core/repository")

@@ -1,7 +1,7 @@
 package org.ghkdqhrbals.client.config
 
 import org.ghkdqhrbals.client.config.interceptor.ApiCallInterceptor
-import org.ghkdqhrbals.model.domain.Jackson
+import org.ghkdqhrbals.model.config.Jackson
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration

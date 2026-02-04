@@ -4,6 +4,7 @@ spring:
     import:
       - optional:aws-secretsmanager:personal/beta
       - classpath:application-kafka.yaml
+      - classpath:application-redis.yaml
       - classpath:application-mysql.yaml
       - classpath:application-common.yaml
   cloud:
@@ -16,3 +17,23 @@ spring:
       secretsmanager:
         enabled: true
         fail-fast: false
+management:
+  endpoints:
+    web:
+      exposure:
+        include: prometheus,metrics,health,info
+  endpoint:
+    prometheus:
+      enabled: true
+    metrics:
+      enabled: true
+  metrics:
+    tags:
+      application: monitoring-service
+      environment: local
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+
+

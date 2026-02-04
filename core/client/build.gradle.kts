@@ -6,7 +6,7 @@ plugins {
     id("io.spring.dependency-management") version "1.1.7"
     id("maven-publish")
     id("jacoco")
-    kotlin("kapt") version "1.9.25"
+    kotlin("kapt")
 }
 
 group = "org.ghkdqhrbals"
@@ -81,7 +81,7 @@ dependencies {
     // thymeleaf
     implementation("org.springframework.batch:spring-batch-infrastructure")
     implementation("org.springframework.batch:spring-batch-core")
-
+    implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-quartz")
     implementation("org.springframework.boot:spring-boot-starter-thymeleaf")
     implementation("nz.net.ultraq.thymeleaf:thymeleaf-layout-dialect:3.3.0")
@@ -117,6 +117,7 @@ dependencies {
     implementation("org.jsoup:jsoup:1.17.2")
     implementation("org.springframework.boot:spring-boot-starter-data-redis")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
+    implementation("io.micrometer:micrometer-registry-prometheus")
     // Apache HttpClient for RestClient connection pooling (version managed by Spring Boot BOM)
     implementation("org.apache.httpcomponents.client5:httpclient5")
     implementation("org.apache.httpcomponents.core5:httpcore5")

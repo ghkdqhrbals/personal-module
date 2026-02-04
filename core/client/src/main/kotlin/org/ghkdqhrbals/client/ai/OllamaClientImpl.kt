@@ -6,7 +6,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonInclude.Include
 import org.ghkdqhrbals.client.config.log.setting
-import org.ghkdqhrbals.model.domain.Jackson
+import org.ghkdqhrbals.model.config.Jackson
 
 /**
  * Ollama 로컬 모델을 사용하는 LLM 클라이언트 - RestClient 기반

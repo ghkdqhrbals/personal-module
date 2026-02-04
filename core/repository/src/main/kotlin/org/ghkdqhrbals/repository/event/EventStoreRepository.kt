@@ -14,6 +14,7 @@ interface EventStoreRepository : JpaRepository<EventStoreEntity, Long> {
      * sagaId로 모든 이벤트를 순서대로 조회
      */
     fun findBySagaIdOrderBySequenceNumberAsc(sagaId: String): List<EventStoreEntity>
+    fun findByEventId(eventId: String): EventStoreEntity?
 
     /**
      * sagaId의 마지막 시퀀스 번호 조회
@@ -26,10 +27,6 @@ interface EventStoreRepository : JpaRepository<EventStoreEntity, Long> {
      */
     fun findBySagaIdAndEventType(sagaId: String, eventType: SagaEventType): List<EventStoreEntity>
 
-    /**
-     * 특정 스텝의 이벤트 조회
-     */
-    fun findBySagaIdAndStepIndex(sagaId: String, stepIndex: Int): List<EventStoreEntity>
 }
 
 @Repository

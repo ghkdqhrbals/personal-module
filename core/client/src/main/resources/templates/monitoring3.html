@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8"/>
+    <title>Redis Stream Group Info</title>
+</head>
+<body>
+
+<h3>Redis Stream Group Information</h3>
+
+<div>
+    <input
+            type="text"
+            id="streamName"
+            placeholder="Stream 이름 (ex: summary:1)"
+            value="summary:1"
+    />
+    <button onclick="GroupInfo.query()">Query</button>
+</div>
+
+<hr/>
+
+<div id="resultContainer"></div>
+
+<script>
+    (function () {
+        const GroupInfo = {};
+        window.GroupInfo = GroupInfo;
+
+        GroupInfo.query = async function () {
+            const stream = document.getElementById("streamName").value.trim();
+            if (!stream) {
+                document.getElementById("resultContainer").innerHTML = "<pre>Stream name required</pre>";
+                return;
+            }
+
+            document.getElementById("resultContainer").innerHTML = "<pre>Loading...</pre>";
+
+            try {
+                const url =
+                    `http://localhost:7070/monitoring/streams/${encodeURIComponent(stream)}/groups`;
+
+                const res = await fetch(url);
+                if (!res.ok) {
+                    document.getElementById("resultContainer").innerHTML =
+                        `<pre>HTTP ${res.status}</pre>`;
+                    return;
+                }
+
+                const data = await res.json();
+                if (!data || data.length === 0) {
+                    document.getElementById("resultContainer").innerHTML =
+                        "<pre>No groups</pre>";
+                    return;
+                }
+
+                render(data);
+
+            } catch (e) {
+                document.getElementById("resultContainer").innerHTML =
+                    `<pre>Error: ${e.message}</pre>`;
+            }
+        };
+
+        function render(groups) {
+            const html = `
+<table border="1" cellpadding="6" cellspacing="0" width="100%">
+  <thead>
+    <tr>
+      <th>Group</th>
+      <th>Consumers</th>
+      <th>Pending</th>
+      <th>Lag</th>
+      <th>Last Delivered ID</th>
+      <th>Consumers Detail</th>
+    </tr>
+  </thead>
+  <tbody>
+    ${groups.map((g, idx) => `
+      <tr>
+        <td>${escape(g.name)}</td>
+        <td>${g.consumers}</td>
+        <td>${g.pending}</td>
+        <td>${g.lag}</td>
+        <td>${escape(g.lastDeliveredId)}</td>
+        <td>
+          <button onclick="GroupInfo.toggle('c-${idx}')">
+            show (${(g.consumerInfo || []).length})
+          </button>
+          <div id="c-${idx}" style="display:none">
+            <pre>${renderConsumers(g.consumerInfo)}</pre>
+          </div>
+        </td>
+      </tr>
+    `).join("")}
+  </tbody>
+</table>
+`;
+            document.getElementById("resultContainer").innerHTML = html;
+        }
+
+        function renderConsumers(consumers) {
+            if (!consumers || consumers.length === 0) return "no consumers";
+            return consumers.map(c =>
+                `${c.name} | pending=${c.pending} | idle=${c.idleTime.millis}ms`
+            ).join("\n");
+        }
+
+        GroupInfo.toggle = function (id) {
+            const el = document.getElementById(id);
+            el.style.display = el.style.display === "none" ? "block" : "none";
+        };
+
+        function escape(v) {
+            const d = document.createElement("div");
+            d.textContent = v ?? "";
+            return d.innerHTML;
+        }
+    })();
+</script>
+
+</body>
+</html>

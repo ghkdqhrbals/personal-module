@@ -43,7 +43,4 @@ data class SagaStateEntity(
 
     @Column(nullable = false)
     var updatedAt: OffsetDateTime = OffsetDateTime.now(ZoneOffset.UTC),
-
-    @Version
-    val version: Long = 0
 )

@@ -25,20 +25,17 @@ services:
 #      start_period: 90s
 
   redis:
-    image: redis:7-alpine
+    image: redis:7.0.11-alpine
     container_name: redis
     ports:
       - "6379:6379"
     volumes:
-      - redis_data:/data
-    restart: unless-stopped
-    command: redis-server --appendonly yes
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
-
+      - redis_datas:/data
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 1G
   db:
     image: arm64v8/mysql:8.0.32
     container_name: mysql
@@ -67,5 +64,8 @@ services:
 volumes:
   ollama_data:
     driver: local
-  redis_data:
+  redis_datas:
     driver: local
+  grafana_data:
+    driver: local
+

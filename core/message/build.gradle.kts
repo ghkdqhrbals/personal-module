@@ -26,6 +26,8 @@ dependencies {
     // Core Spring
     api("org.springframework.boot:spring-boot-starter-data-jpa")
     api("org.springframework.boot:spring-boot-starter")
+
+    api("org.springframework.boot:spring-boot-starter-data-redis")
     api("org.jetbrains.kotlin:kotlin-reflect")
 
     // Jackson

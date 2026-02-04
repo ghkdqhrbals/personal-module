@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8"/>
+    <title>Redis Stream Messages</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 16px; }
+        h3 { margin-bottom: 16px; font-size: 16px; }
+        div { margin-bottom: 12px; }
+        input { padding: 6px 8px; border: 1px solid #ddd; border-radius: 3px; margin-right: 8px; font-size: 13px; }
+        input:focus { outline: none; border-color: #666; }
+        button { padding: 6px 12px; background: #3f7ee9; color: white; border: none; border-radius: 3px; cursor: pointer; margin-right: 4px; font-size: 13px; }
+        button:hover { background: #2860c7; }
+        button:disabled { background: #999; cursor: not-allowed; }
+        #rs_pageInfo { margin: 0 12px; font-size: 13px; }
+        table { border-collapse: collapse; width: 100%; margin-top: 12px; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 13px; }
+        th { font-weight: 600; }
+        pre { margin: 0; font-size: 12px; white-space: pre-wrap; word-wrap: break-word; }
+        a { color: #3f7ee9; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        small { display: block; color: #666; margin-top: 4px; font-size: 12px; }
+    </style>
+</head>
+<body>
+<h3>Redis Stream Messages</h3>
+
+<div>
+    <input id="rs_stream" placeholder="Stream (ex: summary:1)" style="width:260px;"/>
+    <input id="rs_pageSize" type="number" value="5" min="1" style="width:70px;"/>
+    <button onclick="RS.query()">Query</button>
+</div>
+
+<div style="margin-top:8px;">
+    <input id="rs_messageId" placeholder="Message ID (ex: 1735541234567-0)" style="width:260px;"/>
+    <button onclick="RS.search()">Search</button>
+</div>
+
+<div style="margin:12px 0;">
+    <button onclick="RS.prev()" id="rs_prevBtn">Prev</button>
+    <span id="rs_pageInfo"></span>
+    <button onclick="RS.next()" id="rs_nextBtn">Next</button>
+</div>
+
+<table border="1" cellspacing="0" cellpadding="6" width="100%">
+    <thead>
+    <tr>
+        <th>ID</th>
+        <th>Timestamp</th>
+        <th>Fields</th>
+    </tr>
+    </thead>
+    <tbody id="rs_tbody"></tbody>
+</table>
+
+<script>
+    (function () {
+        const RS = {}; window.RS = RS;
+
+        let curPage = 1;
+        let curPageSize = 5;
+        let totalPages = 1;
+        const pageCursor = { 1: null };
+
+        RS.query = function () {
+            curPage = 1;
+            totalPages = 1;
+            curPageSize = Number(document.getElementById("rs_pageSize").value);
+            Object.keys(pageCursor).forEach(k => delete pageCursor[k]);
+            pageCursor[1] = null;
+            document.getElementById("rs_messageId").value = '';
+            load('reset');
+        };
+
+        RS.search = async function () {
+            const stream = document.getElementById("rs_stream").value.trim();
+            const messageId = document.getElementById("rs_messageId").value.trim();
+
+            if (!stream || !messageId) {
+                alert('Stream name and Message ID are required');
+                return;
+            }
+
+            try {
+                const url = `http://localhost:7070/monitoring/streams/${encodeURIComponent(stream)}/messages/${encodeURIComponent(messageId)}`;
+                const res = await fetch(url);
+
+                if (!res.ok) {
+                    alert(`HTTP ${res.status}: ${res.statusText}`);
+                    return;
+                }
+
+                const data = await res.json();
+                renderSingleMessage(data, messageId);
+            } catch (error) {
+                alert(`Error: ${error.message}`);
+            }
+        };
+
+        RS.next = function () {
+            if (!pageCursor[curPage + 1]) return;
+            curPage++;
+            load('next');
+        };
+
+        RS.prev = function () {
+            if (curPage <= 1) return;
+            curPage--;
+            load('prev');
+        };
+
+        async function load(mode) {
+            const stream = document.getElementById("rs_stream").value.trim();
+            if (!stream) return;
+
+            const cursor = pageCursor[curPage] ?? null;
+            const url = new URL(
+                `http://localhost:7070/monitoring/streams/${encodeURIComponent(stream)}/messages`
+            );
+            if (cursor) url.searchParams.set("cursor", cursor);
+            url.searchParams.set("pageSize", curPageSize);
+
+            const res = await fetch(url);
+            if (!res.ok) {
+                render([]);
+                setButtons(true, true, `Page ${curPage}`);
+                return;
+            }
+
+            const data = await res.json();
+            render(data.messages ?? []);
+
+            if (mode !== 'prev' && data.hasMore && data.nextCursor) {
+                pageCursor[curPage + 1] = data.nextCursor;
+            }
+
+            // 전체 페이지 계산
+            totalPages = Math.max(1, Math.ceil((data.totalCount ?? 0) / curPageSize));
+
+            setButtons(
+                curPage <= 1,
+                !pageCursor[curPage + 1],
+                `Page ${curPage} / ${totalPages} (Total: ${data.totalCount ?? 0})`
+            );
+        }
+
+        function setButtons(prevDisabled, nextDisabled, info) {
+            document.getElementById("rs_prevBtn").disabled = prevDisabled;
+            document.getElementById("rs_nextBtn").disabled = nextDisabled;
+            document.getElementById("rs_pageInfo").textContent = info;
+        }
+
+        function render(messages) {
+            const tbody = document.getElementById("rs_tbody");
+            tbody.innerHTML = "";
+
+            if (!messages || messages.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="3" align="center">No messages</td></tr>`;
+                return;
+            }
+
+            messages.forEach(m => {
+                const tr = document.createElement("tr");
+
+                const idTd = document.createElement("td");
+                idTd.innerHTML = `<a href="#" onclick="RS.fillMessageId('${m.id}');return false;">${m.id}</a>`;
+
+                const tsTd = document.createElement("td");
+                const date = new Date(m.timestamp);
+                const isoString = date.toISOString();
+                const kstString = date.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
+                tsTd.innerHTML = `${isoString}<br><small>${kstString}</small>`;
+
+                const fieldsTd = document.createElement("td");
+                fieldsTd.innerHTML = `<pre>${JSON.stringify(m.fields, null, 2)}</pre>`;
+
+                tr.appendChild(idTd);
+                tr.appendChild(tsTd);
+                tr.appendChild(fieldsTd);
+                tbody.appendChild(tr);
+            });
+        }
+
+        function renderSingleMessage(data, id) {
+            const tbody = document.getElementById("rs_tbody");
+            tbody.innerHTML = "";
+
+            const tr = document.createElement("tr");
+
+            const idTd = document.createElement("td");
+            idTd.textContent = id;
+
+            const tsTd = document.createElement("td");
+            const timestamp = id.split("-")[0];
+            const date = new Date(parseInt(timestamp));
+            const isoString = date.toISOString();
+            const kstString = date.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
+            tsTd.innerHTML = `${isoString}<br><small>${kstString}</small>`;
+
+            const fieldsTd = document.createElement("td");
+            fieldsTd.innerHTML = `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+
+            tr.appendChild(idTd);
+            tr.appendChild(tsTd);
+            tr.appendChild(fieldsTd);
+            tbody.appendChild(tr);
+        }
+
+        RS.fillMessageId = function (id) {
+            document.getElementById("rs_messageId").value = id;
+        };
+    })();
+</script>
+</body>
+</html>
