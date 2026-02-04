@@ -12,7 +12,7 @@ fi
 for file in "$@"; do
     if [ -f "$file" ]; then
         echo "Starting $file"
-        docker compose -f "$file" up -d
+        docker compose -f "$file" up -d --build
     else
         echo "File not found: $file"
     fi
