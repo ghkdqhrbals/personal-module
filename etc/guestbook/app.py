@@ -5,6 +5,8 @@ from pydantic import BaseModel, Field
 from datetime import datetime, timezone, timedelta
 import sqlite3, hashlib
 from typing import Optional
+import os
+import requests
 
 app = FastAPI()
 
@@ -28,6 +30,14 @@ def hash_pw(pw: str) -> str:
 
 def conn():
     return sqlite3.connect(DB)
+
+def send_slack_message(message: str):
+    webhook_url = os.getenv('SLACK_WEBHOOK_URL')
+    if webhook_url:
+        payload = {"text": message}
+        response = requests.post(webhook_url, json=payload)
+        if response.status_code != 200:
+            print(f"Failed to send Slack message: {response.text}")
 
 # init
 with conn() as c:
@@ -87,6 +97,7 @@ def create(req: CreateReq):
             "INSERT INTO guestbook (name, pw_hash, message, page, created_at, parent_id) VALUES (?,?,?,?,?,?)",
             (req.name, hash_pw(req.password), req.message, req.page, datetime.utcnow().isoformat(), req.parent_id)
         )
+    send_slack_message(f"New guestbook entry by {req.name} on page {req.page}: {req.message}")
     return {"result": "created"}
 
 @app.get("/guestbook")
