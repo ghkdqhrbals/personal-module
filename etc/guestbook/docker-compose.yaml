@@ -4,6 +4,6 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./data:/data
+      - /Users/gyuminhwangbo/data:/data
     environment:
       - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
