@@ -14,6 +14,13 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: server deploy monitoring start
+        uses: ghkdqhrbals/build-monitoring@v1.0.0
+        with:
+          action: start
+          project_name: guestbook
+
       - name: Make runner.sh executable
         run: chmod +x etc/runner.sh
 #      - name: Setup Docker Buildx
@@ -27,3 +34,39 @@ jobs:
       - name: Run Docker Compose
         run: |
           ./etc/runner.sh etc/guestbook/docker-compose.yaml
+
+      - name: server deploy monitoring end
+        uses: ghkdqhrbals/build-monitoring@v1.0.0
+        id: deploy-stats
+        with:
+          action: end
+          project_name: guestbook
+          job_status: ${{ job.status }}
+          health_check_url: https://lowfidev.cloud/health
+          health_wait_seconds: 60
+
+      - name: Send Slack Notification
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+            status: ${{ job.status }}
+            fields: repo,commit,author,workflow,job,took
+            custom_payload: |
+                {
+                    "attachments": [
+                        {
+                        "color": "${{ job.status == 'success' && 'good' || 'danger' }}",
+                        "blocks": [
+                            {
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": "*Deployment Notification* :rocket:\n*Project:* guestbook\n*Status:* ${{ job.status }}\n*Duration:* ${{ steps.deploy-stats.outputs.build_time_ms }} seconds\n*Health Check:* <${{ steps.deploy-stats.outputs.health_check_url }}|Link>"
+                            }
+                            }
+                        ]
+                        }
+                    ]
+                    }
+        env:
+            SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
