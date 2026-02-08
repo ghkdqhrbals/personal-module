@@ -24,7 +24,8 @@ class Guestbook(Base):
     parent_id = Column(Integer, ForeignKey('guestbook.id'))
     replies = relationship("Guestbook", backref="parent", remote_side=[id])
 
-engine = create_engine('sqlite:////data/guestbook.db')
+database_url = os.getenv('DATABASE_URL', 'sqlite:///guestbook.db')
+engine = create_engine(database_url)
 Session = sessionmaker(bind=engine)
 Base.metadata.create_all(engine)
 

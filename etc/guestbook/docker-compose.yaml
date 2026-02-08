@@ -6,4 +6,5 @@ services:
     volumes:
       - /Users/gyuminhwangbo/data:/data
     environment:
+      - DATABASE_URL=sqlite:////data/guestbook.db
       - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
