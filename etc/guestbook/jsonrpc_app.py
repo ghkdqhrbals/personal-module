@@ -1,12 +1,10 @@
-# app.py
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
-from datetime import datetime, timezone, timedelta
+# jsonrpc_app.py
 import hashlib
-from typing import Optional
+from datetime import datetime, timezone, timedelta
 import os
 import requests
+from jsonrpcserver import method, serve, dispatch
+import json
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
@@ -28,22 +26,6 @@ engine = create_engine('sqlite:////data/guestbook.db')
 Session = sessionmaker(bind=engine)
 Base.metadata.create_all(engine)
 
-app = FastAPI()
-
-# CORS 설정
-app.add_middleware(
-    CORSMiddleware,
-    # CORS origins must be scheme + host + optional port (no path).
-    allow_origins=[
-        "http://localhost:4000",
-        "http://127.0.0.1:4000",
-        "https://ghkdqhrbals.github.io",
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 def hash_pw(pw: str) -> str:
     return hashlib.sha256(pw.encode()).hexdigest()
 
@@ -55,59 +37,44 @@ def send_slack_message(message: str):
         if response.status_code != 200:
             print(f"Failed to send Slack message: {response.text}")
 
-class CreateReq(BaseModel):
-    name: str
-    password: str
-    message: str = Field(..., max_length=500)
-    page: str
-    parent_id: Optional[int] = None
-
-class UpdateReq(BaseModel):
-    password: str
-    message: str = Field(..., max_length=500)
-
-@app.get("/health")
+@method
 def health():
     return {"status": "ok"}
 
-@app.post("/guestbook")
-def create(req: CreateReq):
+@method
+def create_guestbook(name: str, password: str, message: str, page: str, parent_id=None):
+    if len(message) > 500:
+        raise ValueError("Message too long")
     session = Session()
     try:
-        if req.parent_id is not None:
-            parent = session.query(Guestbook).filter(Guestbook.id == req.parent_id).first()
+        if parent_id is not None:
+            parent = session.query(Guestbook).filter(Guestbook.id == parent_id).first()
             if not parent:
-                raise HTTPException(404, "parent not found")
-            if parent.page != req.page:
-                raise HTTPException(400, "parent page mismatch")
+                raise ValueError("parent not found")
+            if parent.page != page:
+                raise ValueError("parent page mismatch")
         entry = Guestbook(
-            name=req.name,
-            pw_hash=hash_pw(req.password),
-            message=req.message,
-            page=req.page,
+            name=name,
+            pw_hash=hash_pw(password),
+            message=message,
+            page=page,
             created_at=datetime.utcnow(),
-            parent_id=req.parent_id
+            parent_id=parent_id
         )
         session.add(entry)
         session.commit()
-        send_slack_message(f"New guestbook entry by {req.name} on page {req.page}: {req.message}")
+        send_slack_message(f"New guestbook entry by {name} on page {page}: {message}")
         return {"result": "created"}
     finally:
         session.close()
 
-@app.get("/guestbook")
-def list_guestbook(
-        page_filter: str = "",
-        page: int = 1,
-        per_page: int = 10,
-        order: str = "desc",
-        sort: Optional[str] = None,
-):
+@method
+def list_guestbook(page_filter="", page=1, per_page=10, order="desc", sort=None):
     session = Session()
     try:
         order_l = ((sort if sort is not None else order) or "").strip().lower()
         if order_l not in {"asc", "desc"}:
-            raise HTTPException(400, "invalid order")
+            raise ValueError("invalid order")
         order_col = Guestbook.id.asc() if order_l == "asc" else Guestbook.id.desc()
 
         if per_page < 1:
@@ -156,29 +123,66 @@ def list_guestbook(
     finally:
         session.close()
 
-@app.put("/guestbook/{id}")
-def update(id: int, req: UpdateReq):
+@method
+def update_guestbook(id: int, password: str, message: str):
+    if len(message) > 500:
+        raise ValueError("Message too long")
     session = Session()
     try:
         entry = session.query(Guestbook).filter(Guestbook.id == id).first()
-        if not entry or entry.pw_hash != hash_pw(req.password):
-            raise HTTPException(403, "invalid password")
-        entry.message = req.message
+        if not entry or entry.pw_hash != hash_pw(password):
+            raise ValueError("invalid password")
+        entry.message = message
         session.commit()
         return {"result": "updated"}
     finally:
         session.close()
 
-@app.delete("/guestbook/{id}")
-def delete(id: int, password: str):
+@method
+def delete_guestbook(id: int, password: str):
     session = Session()
     try:
         entry = session.query(Guestbook).filter(Guestbook.id == id).first()
         if not entry or entry.pw_hash != hash_pw(password):
-            raise HTTPException(403, "invalid password")
+            raise ValueError("invalid password")
         # Delete entry and its replies
         session.query(Guestbook).filter((Guestbook.id == id) | (Guestbook.parent_id == id)).delete()
         session.commit()
         return {"result": "deleted"}
     finally:
         session.close()
+
+@method
+def docs():
+    html = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>JSON-RPC API Documentation</title>
+</head>
+<body>
+    <h1>JSON-RPC API Documentation</h1>
+    <p>Available methods:</p>
+    <ul>
+        <li><strong>health()</strong>: Check service health</li>
+        <li><strong>create_guestbook(name, password, message, page, parent_id=None)</strong>: Create a new guestbook entry</li>
+        <li><strong>list_guestbook(page_filter="", page=1, per_page=10, order="desc", sort=None)</strong>: List guestbook entries</li>
+        <li><strong>update_guestbook(id, password, message)</strong>: Update a guestbook entry</li>
+        <li><strong>delete_guestbook(id, password)</strong>: Delete a guestbook entry</li>
+        <li><strong>docs()</strong>: Show this documentation</li>
+    </ul>
+    <p>Example request:</p>
+    <pre>
+{
+    "jsonrpc": "2.0",
+    "method": "health",
+    "id": 1
+}
+    </pre>
+</body>
+</html>
+"""
+    return html
+
+if __name__ == "__main__":
+    serve(port=8001)
