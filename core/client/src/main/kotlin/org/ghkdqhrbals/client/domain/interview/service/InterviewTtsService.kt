@@ -19,6 +19,10 @@ class InterviewTtsService(
     @Value("\${interview.tts.voice:alloy}") private val voice: String,
     private val restClient: RestClient
 ) {
+    companion object {
+        // OpenAI TTS API character limit per request
+        private const val OPENAI_TTS_MAX_CHARS = 4096
+    }
     
     /**
      * Convert text to speech using OpenAI TTS
@@ -29,7 +33,7 @@ class InterviewTtsService(
         try {
             val requestBody = mapOf(
                 "model" to ttsModel,
-                "input" to text.take(4096), // OpenAI TTS limit
+                "input" to text.take(OPENAI_TTS_MAX_CHARS),
                 "voice" to voice
             )
             

@@ -32,6 +32,12 @@ class InterviewerPromptGenerator(
     @Value("\${interview.prompt.temperature:0.7}")
     private val temperature: Double
 ) {
+    companion object {
+        // Token limit considerations: Leave room for system prompt, conversation history, and response
+        // Using conservative limits to avoid hitting model context windows
+        private const val CV_TEXT_LIMIT_FOR_USER_PROMPT = 2000
+        private const val CV_TEXT_LIMIT_FOR_SYSTEM_PROMPT = 1500
+    }
     
     /**
      * Generate opening question for a new interview session
@@ -43,7 +49,7 @@ class InterviewerPromptGenerator(
             append("Generate an opening question to start the interview.")
             if (!session.cvText.isNullOrBlank()) {
                 append("\n\nCandidate CV/Background:\n")
-                append(session.cvText!!.take(2000)) // Limit CV text to avoid token limits
+                append(session.cvText!!.take(CV_TEXT_LIMIT_FOR_USER_PROMPT))
             }
             if (!session.candidateName.isNullOrBlank()) {
                 append("\n\nCandidate Name: ${session.candidateName}")
@@ -112,7 +118,7 @@ class InterviewerPromptGenerator(
      */
     private fun buildSystemPrompt(session: InterviewSession): String {
         val cvContext = if (!session.cvText.isNullOrBlank()) {
-            "\n\nCandidate Background/CV:\n${session.cvText!!.take(1500)}"
+            "\n\nCandidate Background/CV:\n${session.cvText!!.take(CV_TEXT_LIMIT_FOR_SYSTEM_PROMPT)}"
         } else {
             ""
         }
