@@ -129,4 +129,10 @@ class WebController(
     fun monitoring3(): String {
         return "monitoring3"
     }
+    
+    @GetMapping("/interview")
+    fun interview(model: Model): String {
+        model.addAttribute("pageTitle", "AI Interview")
+        return "interview"
+    }
 }

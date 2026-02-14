@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org" xmlns:layout="http://www.ultraq.net.nz/thymeleaf/layout"
+      layout:decorate="~{layout/default}">
+<head>
+    <title th:text="${pageTitle}">AI Interview</title>
+    <style>
+        .interview-container {
+            max-width: 1000px;
+            margin: 20px auto;
+            padding: 20px;
+        }
+        .health-section {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .health-status {
+            display: flex;
+            gap: 20px;
+            margin-top: 10px;
+        }
+        .health-item {
+            flex: 1;
+            padding: 10px;
+            border-radius: 5px;
+            background: white;
+        }
+        .health-available {
+            border-left: 4px solid #28a745;
+        }
+        .health-unavailable {
+            border-left: 4px solid #dc3545;
+        }
+        .cv-upload-section {
+            background: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #ddd;
+            margin-bottom: 20px;
+        }
+        .interview-chat {
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .chat-messages {
+            max-height: 500px;
+            overflow-y: auto;
+            padding: 15px;
+            border: 1px solid #e9ecef;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            background: #f8f9fa;
+        }
+        .message {
+            margin-bottom: 15px;
+            padding: 10px 15px;
+            border-radius: 8px;
+            max-width: 80%;
+        }
+        .message-user {
+            background: #007bff;
+            color: white;
+            margin-left: auto;
+            text-align: right;
+        }
+        .message-assistant {
+            background: #e9ecef;
+            color: #333;
+        }
+        .message-role {
+            font-weight: bold;
+            font-size: 0.85em;
+            margin-bottom: 5px;
+        }
+        .chat-input-section {
+            display: flex;
+            gap: 10px;
+        }
+        .chat-input {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ced4da;
+            border-radius: 5px;
+        }
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .btn-primary {
+            background: #007bff;
+            color: white;
+        }
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+        .btn-info {
+            background: #17a2b8;
+            color: white;
+        }
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .audio-player {
+            margin-top: 10px;
+        }
+        .error-message {
+            color: #dc3545;
+            padding: 10px;
+            background: #f8d7da;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #6c757d;
+        }
+        .session-info {
+            background: #d1ecf1;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            border-left: 4px solid #17a2b8;
+        }
+    </style>
+</head>
+<body layout:fragment="content">
+<div class="interview-container">
+    <h1>AI Interview</h1>
+    <p>Practice your interview skills with an AI interviewer powered by OpenAI.</p>
+
+    <!-- Health Check Section -->
+    <div class="health-section">
+        <h3>System Health Check</h3>
+        <button class="btn btn-info" onclick="checkHealth()">Check Health</button>
+        <div id="healthStatus" class="health-status" style="display: none;">
+            <div class="health-item" id="openaiHealth">
+                <strong>OpenAI:</strong> <span id="openaiStatus">-</span>
+                <div id="openaiLatency"></div>
+            </div>
+            <div class="health-item" id="localLlmHealth">
+                <strong>Local LLM:</strong> <span id="localLlmStatus">-</span>
+                <div id="localLlmLatency"></div>
+            </div>
+        </div>
+        <div id="healthError" class="error-message" style="display: none;"></div>
+    </div>
+
+    <!-- CV Upload Section -->
+    <div class="cv-upload-section">
+        <h3>Upload Your CV (Optional)</h3>
+        <p>Upload your CV to provide context for the interview questions.</p>
+        <input type="file" id="cvFile" accept=".pdf" />
+        <button class="btn btn-primary" onclick="uploadCv()">Upload CV</button>
+        <div id="cvUploadResult" style="margin-top: 10px;"></div>
+    </div>
+
+    <!-- Interview Session -->
+    <div class="interview-chat">
+        <h3>Interview Session</h3>
+        
+        <div id="sessionInfo" class="session-info" style="display: none;">
+            <strong>Session ID:</strong> <span id="sessionId">-</span>
+        </div>
+        
+        <div id="startSection">
+            <p>Click "Start Interview" to begin your AI interview session.</p>
+            <label for="candidateName">Your Name (Optional):</label>
+            <input type="text" id="candidateName" class="chat-input" placeholder="Enter your name" />
+            <button class="btn btn-success" onclick="startInterview()">Start Interview</button>
+        </div>
+
+        <div id="chatSection" style="display: none;">
+            <div class="chat-messages" id="chatMessages"></div>
+            
+            <div class="chat-input-section">
+                <textarea id="userInput" class="chat-input" rows="3" 
+                    placeholder="Type your answer here..." 
+                    onkeydown="if(event.key === 'Enter' && event.ctrlKey) sendMessage()"></textarea>
+                <button class="btn btn-primary" id="sendBtn" onclick="sendMessage()">Send</button>
+            </div>
+            
+            <div class="audio-player">
+                <button class="btn btn-info" onclick="playLastResponseAudio()">🔊 Play Audio Response</button>
+                <audio id="audioPlayer" controls style="display: none;"></audio>
+            </div>
+        </div>
+
+        <div id="interviewError" class="error-message" style="display: none;"></div>
+        <div id="loading" class="loading" style="display: none;">Processing...</div>
+    </div>
+</div>
+
+<script>
+    let currentSessionId = null;
+    let currentCvText = null;
+    let lastAiResponse = null;
+
+    // Health check
+    async function checkHealth() {
+        document.getElementById('healthError').style.display = 'none';
+        try {
+            const response = await fetch('/api/interviews/health');
+            const data = await response.json();
+            
+            document.getElementById('healthStatus').style.display = 'flex';
+            
+            // OpenAI status
+            const openaiHealth = document.getElementById('openaiHealth');
+            openaiHealth.className = 'health-item ' + (data.openai.available ? 'health-available' : 'health-unavailable');
+            document.getElementById('openaiStatus').textContent = data.openai.available ? '✓ Connected' : '✗ Unavailable';
+            document.getElementById('openaiLatency').textContent = data.openai.latencyMs ? `Latency: ${data.openai.latencyMs}ms` : data.openai.message;
+            
+            // Local LLM status
+            const localLlmHealth = document.getElementById('localLlmHealth');
+            localLlmHealth.className = 'health-item ' + (data.localLlm.available ? 'health-available' : 'health-unavailable');
+            document.getElementById('localLlmStatus').textContent = data.localLlm.available ? '✓ Connected' : '✗ Unavailable';
+            document.getElementById('localLlmLatency').textContent = data.localLlm.latencyMs ? `Latency: ${data.localLlm.latencyMs}ms` : data.localLlm.message;
+            
+        } catch (error) {
+            document.getElementById('healthError').textContent = 'Health check failed: ' + error.message;
+            document.getElementById('healthError').style.display = 'block';
+        }
+    }
+
+    // Upload CV
+    async function uploadCv() {
+        const fileInput = document.getElementById('cvFile');
+        const file = fileInput.files[0];
+        
+        if (!file) {
+            alert('Please select a PDF file');
+            return;
+        }
+        
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        try {
+            const response = await fetch('/api/interviews/cv', {
+                method: 'POST',
+                body: formData
+            });
+            const data = await response.json();
+            
+            document.getElementById('cvUploadResult').innerHTML = 
+                `<span style="color: green;">✓ ${data.message}</span>`;
+            
+            if (data.extractedText) {
+                currentCvText = data.extractedText;
+            }
+        } catch (error) {
+            document.getElementById('cvUploadResult').innerHTML = 
+                `<span style="color: red;">✗ Upload failed: ${error.message}</span>`;
+        }
+    }
+
+    // Start interview
+    async function startInterview() {
+        document.getElementById('loading').style.display = 'block';
+        document.getElementById('interviewError').style.display = 'none';
+        
+        const candidateName = document.getElementById('candidateName').value;
+        
+        try {
+            const response = await fetch('/api/interviews', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    candidateName: candidateName || null,
+                    cvText: currentCvText
+                })
+            });
+            
+            const data = await response.json();
+            currentSessionId = data.id;
+            
+            // Show session info
+            document.getElementById('sessionId').textContent = data.id;
+            document.getElementById('sessionInfo').style.display = 'block';
+            
+            // Hide start section, show chat
+            document.getElementById('startSection').style.display = 'none';
+            document.getElementById('chatSection').style.display = 'block';
+            
+            // Add opening question
+            if (data.openingQuestion) {
+                addMessage('assistant', data.openingQuestion);
+                lastAiResponse = data.openingQuestion;
+            }
+            
+        } catch (error) {
+            document.getElementById('interviewError').textContent = 'Failed to start interview: ' + error.message;
+            document.getElementById('interviewError').style.display = 'block';
+        } finally {
+            document.getElementById('loading').style.display = 'none';
+        }
+    }
+
+    // Send message
+    async function sendMessage() {
+        const userInput = document.getElementById('userInput');
+        const message = userInput.value.trim();
+        
+        if (!message) return;
+        if (!currentSessionId) {
+            alert('Please start an interview first');
+            return;
+        }
+        
+        document.getElementById('loading').style.display = 'block';
+        document.getElementById('sendBtn').disabled = true;
+        document.getElementById('interviewError').style.display = 'none';
+        
+        // Add user message to UI
+        addMessage('user', message);
+        userInput.value = '';
+        
+        try {
+            const response = await fetch(`/api/interviews/${currentSessionId}/turns`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userMessage: message })
+            });
+            
+            const data = await response.json();
+            
+            // Add AI response to UI
+            addMessage('assistant', data.aiResponse);
+            lastAiResponse = data.aiResponse;
+            
+        } catch (error) {
+            document.getElementById('interviewError').textContent = 'Failed to send message: ' + error.message;
+            document.getElementById('interviewError').style.display = 'block';
+        } finally {
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('sendBtn').disabled = false;
+            userInput.focus();
+        }
+    }
+
+    // Add message to chat
+    function addMessage(role, content) {
+        const messagesDiv = document.getElementById('chatMessages');
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'message message-' + role;
+        
+        const roleLabel = role === 'user' ? 'You' : 'AI Interviewer';
+        messageDiv.innerHTML = `
+            <div class="message-role">${roleLabel}</div>
+            <div class="message-content">${content}</div>
+        `;
+        
+        messagesDiv.appendChild(messageDiv);
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+
+    // Play audio
+    async function playLastResponseAudio() {
+        if (!lastAiResponse) {
+            alert('No response to play');
+            return;
+        }
+        
+        try {
+            const response = await fetch('/api/interviews/tts', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(lastAiResponse)
+            });
+            
+            const audioBlob = await response.blob();
+            const audioUrl = URL.createObjectURL(audioBlob);
+            
+            const audioPlayer = document.getElementById('audioPlayer');
+            audioPlayer.src = audioUrl;
+            audioPlayer.style.display = 'block';
+            audioPlayer.play();
+            
+        } catch (error) {
+            alert('Failed to load audio: ' + error.message);
+        }
+    }
+</script>
+</body>
+</html>
