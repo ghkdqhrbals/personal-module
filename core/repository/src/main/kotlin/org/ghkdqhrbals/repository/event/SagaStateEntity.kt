@@ -12,7 +12,6 @@ import java.time.ZoneOffset
 @Table(
     name = "saga_state",
     indexes = [
-        Index(name = "idx_saga_state_saga_id", columnList = "sagaId"),
         Index(name = "idx_saga_state_status", columnList = "status"),
         Index(name = "idx_saga_state_type", columnList = "sagaType")
     ]
