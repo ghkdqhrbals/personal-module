@@ -103,8 +103,8 @@ class EventService(
         currentStepIndex: Int? = null,
         sagaData: Map<String, Any>? = null
     ): SagaStateEntity {
-        val state = sagaStateRepository.findById(sagaId)
-            .orElseThrow { IllegalStateException("Saga not found: $sagaId") }
+        val state = sagaStateRepository.findBySagaId(sagaId)
+            ?: throw IllegalStateException("Saga not found: $sagaId")
 
         status?.let { state.status = it }
         currentStepIndex?.let { state.currentStepIndex = it }
@@ -122,7 +122,7 @@ class EventService(
      */
     @Transactional(readOnly = true)
     fun getSagaState(sagaId: String): SagaStateEntity? {
-        return sagaStateRepository.findById(sagaId).orElse(null)
+        return sagaStateRepository.findBySagaId(sagaId)
     }
 
     /**
