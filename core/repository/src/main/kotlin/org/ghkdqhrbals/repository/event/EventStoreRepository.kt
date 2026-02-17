@@ -30,7 +30,12 @@ interface EventStoreRepository : JpaRepository<EventStoreEntity, Long> {
 }
 
 @Repository
-interface SagaStateRepository : JpaRepository<SagaStateEntity, String> {
+interface SagaStateRepository : JpaRepository<SagaStateEntity, Long> {
+
+    /**
+     * sagaId로 Saga 조회
+     */
+    fun findBySagaId(sagaId: String): SagaStateEntity?
 
     /**
      * 상태별 Saga 조회

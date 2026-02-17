@@ -17,8 +17,7 @@ import java.time.ZoneOffset
     ]
 )
 data class SagaStateEntity(
-    @Id
-    @Column(length = 36)
+    @Column(nullable = false, unique = true, length = 36)
     val sagaId: String,
 
     @Column(nullable = false, length = 100)
@@ -43,4 +42,8 @@ data class SagaStateEntity(
 
     @Column(nullable = false)
     var updatedAt: OffsetDateTime = OffsetDateTime.now(ZoneOffset.UTC),
-)
+) {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    var id: Long = 0
+}
