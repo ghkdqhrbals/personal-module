@@ -372,6 +372,51 @@ def _sources_from_mcp_output(body: dict[str, Any]) -> list[dict[str, str]]:
     return sources
 
 
+def _normalize_sources(sources: list[dict[str, str]]) -> list[dict[str, str]]:
+    normalized: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    for source in sources:
+        source_type = str(source.get("type") or "").strip()
+        url = str(source.get("url") or "").strip()
+        title = str(source.get("title") or "").strip()
+        if not url:
+            continue
+
+        dedupe_key = (source_type, url)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+
+        if source_type == "post" and (not title or title == url):
+            title = url.rstrip("/").split("/")[-1] or "Post"
+        elif source_type == "resume" and not title:
+            title = "CV"
+
+        normalized.append(
+            {
+                "type": source_type,
+                "title": title or url,
+                "url": url,
+            }
+        )
+
+    return normalized
+
+
+def _append_markdown_links(answer: str, sources: list[dict[str, str]]) -> str:
+    normalized_sources = _normalize_sources(sources)
+    if not normalized_sources:
+        return answer.strip()
+
+    lines = ["참고 링크:"]
+    for source in normalized_sources:
+        lines.append(f"- [{source['title']}]({source['url']})")
+
+    answer_text = answer.strip()
+    return answer_text + "\n\n" + "\n".join(lines)
+
+
 def _call_chat_completion(system_prompt: str, user_prompt: str) -> str:
     api_key, model, api_base = _llm_config()
     if not api_key:
@@ -467,9 +512,10 @@ def _call_responses_with_remote_mcp(
     if not answer:
         raise RuntimeError("Responses API returned no output text.")
 
+    sources = _sources_from_mcp_output(body)
     return {
-        "answer": answer,
-        "sources": _sources_from_mcp_output(body),
+        "answer": _append_markdown_links(answer, sources),
+        "sources": _normalize_sources(sources),
     }
 
 
@@ -508,4 +554,9 @@ def answer_visitor_question(
 
     fallback_user_prompt = user_prompt + f"\n\n[참고 컨텍스트]\n{context}"
     answer = _call_chat_completion(system_prompt, fallback_user_prompt)
-    return {"answer": answer, "sources": sources, "mode": "chat_completions_context_fallback"}
+    normalized_sources = _normalize_sources(sources)
+    return {
+        "answer": _append_markdown_links(answer, normalized_sources),
+        "sources": normalized_sources,
+        "mode": "chat_completions_context_fallback",
+    }
