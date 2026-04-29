@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - main
+    paths:
+      - "etc/guestbook/**"
+      - "docs/**"
+      - "cv.md"
+      - ".github/workflows/cd-pipeline.yml"
   workflow_dispatch:
 
 jobs:
@@ -11,6 +16,10 @@ jobs:
     runs-on: [self-hosted, macOS, ARM64]
     env:
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_MODEL: ${{ vars.OPENAI_MODEL != '' && vars.OPENAI_MODEL || 'gpt-4.1-mini' }}
+      OPENAI_API_BASE: ${{ vars.OPENAI_API_BASE != '' && vars.OPENAI_API_BASE || 'https://api.openai.com/v1' }}
+      GUESTBOOK_DATA_DIR: ${{ vars.GUESTBOOK_DATA_DIR != '' && vars.GUESTBOOK_DATA_DIR || './data' }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -23,6 +32,18 @@ jobs:
 
       - name: Make runner.sh executable
         run: chmod +x etc/runner.sh
+
+      - name: Validate deploy env
+        shell: bash
+        run: |
+          set -eo pipefail
+          test -n "$OPENAI_API_KEY"
+
+      - name: Prepare guestbook data directory
+        shell: bash
+        run: |
+          set -eo pipefail
+          mkdir -p "$GUESTBOOK_DATA_DIR"
 #      - name: Setup Docker Buildx
 #        run: |
 #          docker buildx use default
@@ -34,6 +55,36 @@ jobs:
       - name: Run Docker Compose
         run: |
           ./etc/runner.sh etc/guestbook/docker-compose.yaml
+
+      - name: Verify local endpoints
+        shell: bash
+        run: |
+          set -eo pipefail
+          curl -fsS http://127.0.0.1:8000/health
+          python - <<'PY'
+          import sys
+          import urllib.error
+          import urllib.request
+
+          urls = [
+              "http://127.0.0.1:8000/mcp",
+              "http://127.0.0.1:8000/mcp/",
+          ]
+
+          for url in urls:
+              try:
+                  with urllib.request.urlopen(url, timeout=10) as response:
+                      print(f"{url} -> {response.status}")
+                      sys.exit(0)
+              except urllib.error.HTTPError as exc:
+                  if exc.code < 500:
+                      print(f"{url} -> HTTP {exc.code}")
+                      sys.exit(0)
+              except Exception as exc:
+                  print(f"{url} -> {exc}")
+
+          raise SystemExit("MCP endpoint did not respond successfully")
+          PY
 
       - name: server deploy monitoring end
         uses: ghkdqhrbals/build-monitoring@v1.0.3
