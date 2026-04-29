@@ -1,4 +1,5 @@
 # app.py
+import contextlib
 import hashlib
 import json
 import os
@@ -45,8 +46,6 @@ engine = create_engine(database_url)
 Session = sessionmaker(bind=engine)
 Base.metadata.create_all(engine)
 
-app = FastAPI()
-
 mcp = FastMCP(
     "ghkdqhrbals-blog",
     instructions=(
@@ -58,6 +57,15 @@ mcp = FastMCP(
     ),
     streamable_http_path="/",
 )
+
+
+@contextlib.asynccontextmanager
+async def lifespan(app: FastAPI):
+    async with mcp.session_manager.run():
+        yield
+
+
+app = FastAPI(lifespan=lifespan)
 
 # CORS 설정
 app.add_middleware(
