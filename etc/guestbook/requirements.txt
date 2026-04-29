@@ -3,3 +3,5 @@ uvicorn
 requests
 jsonrpcserver
 sqlalchemy
+mcp
+python-frontmatter
