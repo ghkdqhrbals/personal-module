@@ -15,6 +15,22 @@ The server provides read-oriented access to the public blog at:
 
 It does not depend on a local checkout of the `portfolios` project for content resolution anymore. Recent posts, CV content, and individual article content are fetched from the live site.
 
+## Wiki Release Notes
+
+### 2026-04-29 배포 반영
+
+- `POST /ask/stream` SSE endpoint 추가
+- OpenAI Responses API 스트리밍 relay 지원
+- MCP 도구 호출 이벤트(`tool_call`)를 프론트로 실시간 전달 (`tool`, `arguments`)
+- 최종 `done` 이벤트에서 `result.answer`, `result.sources`, `result.tool_calls`, `result.mode`를 함께 전달
+
+운영 반영 시 확인사항:
+
+1. `PUBLIC_MCP_SERVER_URL` 또는 `REMOTE_MCP_SERVER_URL` 이 설정되어 있어야 함
+2. 프론트에서 `Accept: text/event-stream` 처리 및 SSE reconnect 정책 필요
+3. 이벤트 타입별 UI 처리 필요 (`answer_delta`, `tool_call`, `done`, `error`)
+4. 스트리밍은 remote MCP + Responses API 모드에서만 지원됨
+
 ## Goals
 
 - Expose blog and CV information through MCP tools and resources
@@ -63,16 +79,47 @@ Request body:
 
 SSE events:
 
-- `answer_delta`: 모델 답변 토큰/문자열 증분
-- `tool_call`: MCP tool 호출 정보 (`tool`, `arguments`)
-- `done`: 최종 집계 결과 (`answer`, `sources`, `tool_calls`, `mode`)
-- `error`: 처리 중 오류
+- `answer_delta`: 모델 답변 토큰/문자열 증분 (`delta`)
+- `tool_call`: MCP tool 호출 정보 (`tool_call.tool`, `tool_call.arguments`)
+- `done`: 최종 집계 결과 (`result.answer`, `result.sources`, `result.tool_calls`, `result.mode`)
+- `error`: 처리 중 오류 (`error`)
+
+Each SSE message uses the standard `event` and `data` fields. The `data` field is JSON.
+
+Answer delta example:
+
+```text
+event: answer_delta
+data: {"event":"answer_delta","call_id":"...","delta":"Redis Stream의 pending은 ..."}
+```
+
+Tool call example:
+
+```text
+event: tool_call
+data: {"event":"tool_call","call_id":"...","tool_call":{"tool":"search_posts","arguments":{"query":"Redis Stream pending"}}}
+```
+
+Done example:
+
+```text
+event: done
+data: {"event":"done","call_id":"...","result":{"answer":"...","sources":[{"title":"...","url":"..."}],"tool_calls":[{"tool":"search_posts","arguments":{"query":"Redis Stream pending"}}],"mode":"responses_remote_mcp_stream"}}
+```
+
+Error example:
+
+```text
+event: error
+data: {"error":"PUBLIC_MCP_SERVER_URL 또는 REMOTE_MCP_SERVER_URL 환경변수가 필요합니다."}
+```
 
 Notes:
 
 - `/ask/stream` 는 OpenAI Responses API의 streaming 응답을 프론트로 relay 한다.
-- `tool_call` 이벤트는 모델이 실제 MCP tool 호출을 추가하는 시점에 전달된다.
+- `tool_call` 이벤트는 MCP tool 호출 인자가 확정되거나 호출 item이 완료된 시점에 전달된다.
 - 스트리밍 모드는 remote MCP URL이 설정된 경우(`PUBLIC_MCP_SERVER_URL` 또는 `REMOTE_MCP_SERVER_URL`)에 동작한다.
+- 요청의 `question`은 필수이며 최대 1500자까지 허용한다.
 
 ### MCP Transport Endpoint
 
@@ -116,6 +163,9 @@ Allowed hosts:
 Allowed origins:
 
 - `https://lowfidev.cloud`
+- `https://api.openai.com`
+- `https://chatgpt.com`
+- `https://platform.openai.com`
 - `http://localhost:8000`
 - `http://127.0.0.1:8000`
 
