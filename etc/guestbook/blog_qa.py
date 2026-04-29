@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from html.parser import HTMLParser
 from typing import Any
-from urllib.parse import urljoin, urlparse
+from urllib.parse import quote, urljoin, urlparse
 
 SITE_BASE_URL = os.getenv("BLOG_SITE_BASE_URL", "https://ghkdqhrbals.github.io/portfolios").rstrip("/")
 RECENT_POSTS_URL = os.getenv("BLOG_RECENT_POSTS_URL", SITE_BASE_URL + "/")
@@ -133,6 +133,7 @@ def _canonicalize_url(url: str) -> str:
     path = parsed.path or ""
     if path not in {"", "/"}:
         path = path.rstrip("/")
+    path = quote(path, safe="/-._~")
 
     normalized = parsed._replace(path=path)
     return normalized.geturl()
