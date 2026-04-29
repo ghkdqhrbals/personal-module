@@ -19,6 +19,7 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       OPENAI_MODEL: ${{ vars.OPENAI_MODEL != '' && vars.OPENAI_MODEL || 'gpt-4.1-mini' }}
       OPENAI_API_BASE: ${{ vars.OPENAI_API_BASE != '' && vars.OPENAI_API_BASE || 'https://api.openai.com/v1' }}
+      PUBLIC_MCP_SERVER_URL: ${{ vars.PUBLIC_MCP_SERVER_URL != '' && vars.PUBLIC_MCP_SERVER_URL || 'https://lowfidev.cloud/mcp/' }}
       GUESTBOOK_DATA_DIR: ${{ vars.GUESTBOOK_DATA_DIR != '' && vars.GUESTBOOK_DATA_DIR || './data' }}
       BLOG_CONTENT_DIR: ${{ vars.BLOG_CONTENT_DIR != '' && vars.BLOG_CONTENT_DIR || '/blog-content' }}
       BLOG_DOCS_DIR: ${{ vars.BLOG_DOCS_DIR != '' && vars.BLOG_DOCS_DIR || '/blog-content/docs' }}
