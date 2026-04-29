@@ -466,19 +466,6 @@ def _normalize_sources(sources: list[dict[str, str]]) -> list[dict[str, str]]:
     return normalized
 
 
-def _append_markdown_links(answer: str, sources: list[dict[str, str]]) -> str:
-    normalized_sources = _normalize_sources(sources)
-    if not normalized_sources:
-        return answer.strip()
-
-    lines = ["참고 링크:"]
-    for source in normalized_sources:
-        lines.append(f"- [{source['title']}]({source['url']})")
-
-    answer_text = answer.strip()
-    return answer_text + "\n\n" + "\n".join(lines)
-
-
 def _call_chat_completion(system_prompt: str, user_prompt: str) -> str:
     api_key, model, api_base = _llm_config()
     if not api_key:
@@ -575,9 +562,10 @@ def _call_responses_with_remote_mcp(
         raise RuntimeError("Responses API returned no output text.")
 
     sources = _sources_from_mcp_output(body)
+    normalized_sources = _normalize_sources(sources)
     return {
-        "answer": _append_markdown_links(answer, sources),
-        "sources": _normalize_sources(sources),
+        "answer": answer,
+        "sources": normalized_sources,
     }
 
 
@@ -600,7 +588,9 @@ def answer_visitor_question(
         "특정 주제, 키워드, 기술명을 물으면 search_posts 를 우선 사용해 관련 글을 찾는다. "
         "제공된 MCP 도구와 그 결과 안에서만 답하고, 추측이 필요한 경우에는 추측이라고 밝힌다. "
         "정보가 없으면 모른다고 답한다. "
-        "답변 끝에는 짧게 핵심만 정리하고, 필요한 경우 참고한 글 제목이나 이력서를 언급한다."
+        "참고 링크를 포함할 때는 반드시 Markdown 링크 형식 [제목](URL) 만 사용하고, 생 URL은 쓰지 않는다. "
+        "답변 말미에 관련 포스팅이나 이력서를 언급할 때는 가능하면 Markdown 링크로 직접 연결한다. "
+        "답변 끝에는 짧게 핵심만 정리한다."
     )
     user_prompt = _build_user_prompt(clean_question, page_url=page_url, page_title=page_title)
 
@@ -619,7 +609,7 @@ def answer_visitor_question(
     answer = _call_chat_completion(system_prompt, fallback_user_prompt)
     normalized_sources = _normalize_sources(sources)
     return {
-        "answer": _append_markdown_links(answer, normalized_sources),
+        "answer": answer,
         "sources": normalized_sources,
         "mode": "chat_completions_context_fallback",
     }
