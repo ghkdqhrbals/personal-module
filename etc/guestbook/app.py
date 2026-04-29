@@ -24,6 +24,7 @@ from blog_qa import (
     list_categories_with_counts,
     post_summary,
     read_resume,
+    search_posts as search_blog_posts,
 )
 
 
@@ -59,6 +60,7 @@ mcp = FastMCP(
     instructions=(
         "이 서버는 황보규민의 기술 블로그 최근 포스팅과 이력서 정보를 제공합니다. "
         "get_recent_posts 로 최근 포스팅을 조회하고, "
+        "search_posts 로 주제 검색을 하고, "
         "get_post_content 로 특정 포스팅 내용을, "
         "get_resume 으로 이력서를 확인할 수 있습니다. "
         "answer_visitor_question 으로 블로그 방문자 질문에 답변할 수도 있습니다."
@@ -168,6 +170,15 @@ def get_recent_posts(limit: int = 10, category: str = "") -> str:
 @mcp.tool()
 def get_post_content(url_or_path: str) -> str:
     return load_post_content(url_or_path)
+
+
+@mcp.tool()
+def search_posts(query: str, limit: int = 10) -> str:
+    query = (query or "").strip()
+    if not query:
+        raise ValueError("query is required")
+    posts = search_blog_posts(query, limit=limit)
+    return json.dumps([post_summary(p) for p in posts], ensure_ascii=False, indent=2)
 
 
 @mcp.tool()
