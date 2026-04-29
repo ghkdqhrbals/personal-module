@@ -860,6 +860,7 @@ def answer_visitor_question(
         "제공된 MCP 도구와 그 결과 안에서만 답하고, 추측이 필요한 경우에는 추측이라고 밝힌다. "
         "정보가 없으면 모른다고 답한다. "
         "참고 링크를 포함할 때는 반드시 Markdown 링크 형식 [제목](URL) 만 사용하고, 생 URL은 쓰지 않는다. "
+        "특히 https://ghkdqhrbals.github.io/portfolios/docs 로 시작하는 URL은 반드시 [글 제목](URL) Markdown 링크 형식으로만 작성한다. "
         "링크가 필요하면 [링크](URL) 같은 일반 라벨 대신 글 제목 자체를 링크로 만든다. "
         "URL 끝의 불필요한 trailing slash 는 제거된 형태를 사용한다. "
         "답변 말미에 관련 포스팅이나 이력서를 언급할 때는 가능하면 Markdown 링크로 직접 연결한다. "
@@ -909,7 +910,11 @@ def stream_visitor_question(
         "가능하면 먼저 연결된 MCP 도구를 사용해서 필요한 정보만 찾아본 뒤 답한다. "
         "특정 주제, 키워드, 기술명을 물으면 search_posts 를 우선 사용해 관련 글을 찾는다. "
         "제공된 MCP 도구와 그 결과 안에서만 답하고, 추측이 필요한 경우에는 추측이라고 밝힌다. "
-        "정보가 없으면 모른다고 답한다."
+        "정보가 없으면 모른다고 답한다. "
+        "참고 링크를 포함할 때는 반드시 Markdown 링크 형식 [제목](URL) 만 사용하고, 생 URL은 쓰지 않는다. "
+        "특히 https://ghkdqhrbals.github.io/portfolios/docs 로 시작하는 URL은 반드시 [글 제목](URL) Markdown 링크 형식으로만 작성한다. "
+        "링크가 필요하면 [링크](URL) 같은 일반 라벨 대신 글 제목 자체를 링크로 만든다. "
+        "URL 끝의 불필요한 trailing slash 는 제거된 형태를 사용한다."
     )
     user_prompt = _build_user_prompt(clean_question, page_url=page_url, page_title=page_title)
     yield from _stream_responses_with_remote_mcp(
