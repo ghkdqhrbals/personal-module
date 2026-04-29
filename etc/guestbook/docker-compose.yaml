@@ -1,8 +1,8 @@
 services:
   guestbook:
     build:
-      context: ../..
-      dockerfile: etc/guestbook/Dockerfile
+      context: .
+      dockerfile: Dockerfile
     ports:
       - "8000:8000"
     volumes:
