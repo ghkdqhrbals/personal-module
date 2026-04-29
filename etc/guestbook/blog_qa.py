@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import json
 import os
 import re
@@ -7,15 +8,14 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
+from html.parser import HTMLParser
 from typing import Any
+from urllib.parse import urljoin, urlparse
 
-import frontmatter
-
-BASE_DIR = Path(__file__).resolve().parents[2]
-DOCS_DIR = BASE_DIR / "docs"
-CV_PATH = BASE_DIR / "cv.md"
-SITE_BASE_URL = "https://ghkdqhrbals.github.io/portfolios"
+SITE_BASE_URL = os.getenv("BLOG_SITE_BASE_URL", "https://ghkdqhrbals.github.io/portfolios").rstrip("/")
+RECENT_POSTS_URL = os.getenv("BLOG_RECENT_POSTS_URL", SITE_BASE_URL + "/")
+CV_URL = os.getenv("BLOG_CV_URL", SITE_BASE_URL + "/cv/")
+SITE_ORIGIN = f"{urlparse(SITE_BASE_URL).scheme}://{urlparse(SITE_BASE_URL).netloc}"
 REMOTE_MCP_ALLOWED_TOOLS = [
     "get_recent_posts",
     "get_post_content",
@@ -36,6 +36,64 @@ class PostRecord:
     content: str
 
 
+class ContentExtractor(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.capture_depth = 0
+        self.skip_depth = 0
+        self.chunks: list[str] = []
+        self.title: str = ""
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attrs_dict = dict(attrs)
+        if tag in {"script", "style", "noscript"}:
+            self.skip_depth += 1
+            return
+
+        if (tag == "main" and attrs_dict.get("id") == "main-content") or (
+            tag == "div" and attrs_dict.get("id") == "main-content"
+        ):
+            self.capture_depth += 1
+            return
+
+        if self.capture_depth > 0:
+            if tag in {"main", "div", "section", "article", "p", "li", "h1", "h2", "h3", "h4", "blockquote", "pre", "br", "hr"}:
+                self.chunks.append("\n")
+            if tag == "a":
+                href = attrs_dict.get("href")
+                if href:
+                    self.chunks.append("")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in {"script", "style", "noscript"} and self.skip_depth > 0:
+            self.skip_depth -= 1
+            return
+
+        if tag in {"main", "div"} and self.capture_depth > 0:
+            self.capture_depth -= 1
+            self.chunks.append("\n")
+            return
+
+        if self.capture_depth > 0 and tag in {"div", "section", "article", "p", "li", "h1", "h2", "h3", "h4", "blockquote", "pre"}:
+            self.chunks.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        if self.skip_depth > 0:
+            return
+        if self.capture_depth > 0:
+            stripped = data.strip()
+            if stripped:
+                self.chunks.append(stripped)
+
+    def text(self) -> str:
+        text = "\n".join(chunk for chunk in self.chunks if chunk is not None)
+        text = html.unescape(text)
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        text = re.sub(r"[ \t]+\n", "\n", text)
+        text = re.sub(r"\n[ \t]+", "\n", text)
+        return text.strip()
+
+
 def _normalize_text(value: str) -> str:
     return re.sub(r"\s+", " ", (value or "").strip()).lower()
 
@@ -45,57 +103,90 @@ def _tokenize(value: str) -> set[str]:
     return {token for token in re.split(r"[^0-9a-zA-Z가-힣]+", text) if len(token) >= 2}
 
 
-def _load_markdown(path: Path):
-    return frontmatter.load(str(path))
+def _fetch_text(url: str) -> str:
+    req = urllib.request.Request(
+        url=url,
+        headers={
+            "User-Agent": "guestbook-mcp/1.0",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=30) as response:
+        return response.read().decode("utf-8", errors="replace")
+
+
+def _absolute_url(value: str) -> str:
+    if value.startswith("http://") or value.startswith("https://"):
+        return value
+    if value.startswith("/"):
+        return urljoin(SITE_ORIGIN, value)
+    return urljoin(SITE_BASE_URL + "/", value.lstrip("/"))
+
+
+def _extract_search_data(html_text: str) -> list[dict[str, Any]]:
+    match = re.search(r"<template[^>]*>\s*(\[\s*\{.*?\}\s*\])\s*</template>", html_text, re.DOTALL)
+    if not match:
+        raise RuntimeError("최근 포스트 메타데이터를 홈페이지에서 찾지 못했습니다.")
+    return json.loads(match.group(1))
+
+
+def _extract_page_text(html_text: str) -> str:
+    parser = ContentExtractor()
+    parser.feed(html_text)
+    parser.close()
+    return parser.text()
+
+
+def _extract_page_title(html_text: str) -> str:
+    match = re.search(r"<title>(.*?)</title>", html_text, re.DOTALL | re.IGNORECASE)
+    if not match:
+        return ""
+    title = html.unescape(match.group(1))
+    return title.split("|")[0].strip()
+
+
+def _parse_date(value: str) -> datetime | None:
+    if not value:
+        return None
+    value = value.strip()
+    for fmt in ("%Y-%m-%d", "%Y.%m.%d"):
+        try:
+            return datetime.strptime(value[:10], fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _post_from_search_entry(entry: dict[str, Any]) -> PostRecord | None:
+    raw_url = str(entry.get("url") or "").strip()
+    title = str(entry.get("title") or "").strip()
+    if not raw_url or not title:
+        return None
+
+    url = _absolute_url(raw_url)
+    date_str = str(entry.get("date") or "").strip()
+    date_obj = _parse_date(date_str)
+    if date_obj is None:
+        return None
+
+    parent = str(entry.get("parent") or "").strip()
+    category = str(entry.get("cat") or "").strip()
+    return PostRecord(
+        date=date_str,
+        date_obj=date_obj,
+        title=title,
+        parent=parent,
+        category=category,
+        url=url,
+        file_path=urlparse(url).path,
+        content="",
+    )
 
 
 def collect_posts() -> list[PostRecord]:
-    posts: list[PostRecord] = []
-    if not DOCS_DIR.exists():
-        return posts
-
-    for md_file in sorted(DOCS_DIR.rglob("*.md")):
-        try:
-            post = _load_markdown(md_file)
-        except Exception:
-            continue
-
-        date_val = post.metadata.get("date")
-        title = post.metadata.get("title", "")
-        parent = post.metadata.get("parent", "")
-
-        if not date_val or not title:
-            continue
-
-        if isinstance(date_val, datetime):
-            date_obj = date_val
-            date_str = date_val.strftime("%Y-%m-%d")
-        else:
-            date_str = str(date_val)
-            try:
-                date_obj = datetime.strptime(date_str[:10], "%Y-%m-%d")
-            except ValueError:
-                continue
-
-        rel = md_file.relative_to(BASE_DIR)
-        url_path = "/" + str(rel).replace("\\", "/").replace(".md", "/")
-        url = SITE_BASE_URL.rstrip("/") + url_path
-        parts = rel.parts
-        category = parts[1] if len(parts) > 2 else ""
-
-        posts.append(
-            PostRecord(
-                date=date_str,
-                date_obj=date_obj,
-                title=title,
-                parent=parent,
-                category=category,
-                url=url,
-                file_path=str(md_file),
-                content=post.content,
-            )
-        )
-
+    html_text = _fetch_text(RECENT_POSTS_URL)
+    search_entries = _extract_search_data(html_text)
+    posts = [post for post in (_post_from_search_entry(entry) for entry in search_entries) if post is not None]
     posts.sort(key=lambda item: item.date_obj, reverse=True)
     return posts
 
@@ -111,41 +202,18 @@ def post_summary(post: PostRecord) -> dict[str, str]:
 
 
 def read_resume() -> str:
-    if not CV_PATH.exists():
-        return ""
-    try:
-        post = _load_markdown(CV_PATH)
-        return post.content
-    except Exception:
-        return ""
+    html_text = _fetch_text(CV_URL)
+    return _extract_page_text(html_text)
 
 
 def get_post_content(url_or_path: str) -> str:
-    path_str = url_or_path
-    if path_str.startswith("http"):
-        prefix = SITE_BASE_URL.rstrip("/")
-        path_str = path_str[len(prefix):].lstrip("/")
-        path_str = path_str.rstrip("/") + ".md"
-
-    target = BASE_DIR / path_str
-    if not target.exists():
-        alt = BASE_DIR / path_str.replace(".md", "") / "index.md"
-        if alt.exists():
-            target = alt
-        else:
-            return f"오류: '{path_str}' 파일을 찾을 수 없습니다."
-
-    try:
-        post = _load_markdown(target)
-        meta_lines = [f"# {post.metadata.get('title', target.stem)}"]
-        if post.metadata.get("date"):
-            meta_lines.append(f"**날짜**: {post.metadata['date']}")
-        if post.metadata.get("parent"):
-            meta_lines.append(f"**카테고리**: {post.metadata['parent']}")
-        header = "\n".join(meta_lines)
-        return header + "\n\n---\n\n" + post.content
-    except Exception as exc:
-        return f"파일 읽기 오류: {exc}"
+    url = _absolute_url(url_or_path)
+    html_text = _fetch_text(url)
+    title = _extract_page_title(html_text) or url.rstrip("/").split("/")[-1]
+    body = _extract_page_text(html_text)
+    if not body:
+        return f"오류: '{url}' 페이지 본문을 읽지 못했습니다."
+    return f"# {title}\n\n---\n\n{body}"
 
 
 def list_categories_with_counts() -> dict[str, int]:
@@ -158,10 +226,13 @@ def list_categories_with_counts() -> dict[str, int]:
 
 def _score_post(question_tokens: set[str], page_url: str, page_title: str, post: PostRecord) -> int:
     score = 0
-    haystack_tokens = _tokenize(" ".join([post.title, post.parent, post.category, post.content[:2500]]))
+    title_tokens = _tokenize(post.title)
+    parent_tokens = _tokenize(post.parent)
+    category_tokens = _tokenize(post.category)
+    haystack_tokens = title_tokens | parent_tokens | category_tokens
 
     score += len(question_tokens & haystack_tokens) * 4
-    score += len(question_tokens & _tokenize(post.title)) * 5
+    score += len(question_tokens & title_tokens) * 5
 
     if page_title and _normalize_text(page_title) in _normalize_text(post.title):
         score += 8
@@ -177,8 +248,9 @@ def select_relevant_posts(question: str, page_url: str = "", page_title: str = "
 
     for post in collect_posts():
         score = _score_post(tokens, page_url, page_title, post)
-        if score > 0:
-            ranked.append((score, post))
+        if score <= 0:
+            continue
+        ranked.append((score, post))
 
     ranked.sort(key=lambda item: (item[0], item[1].date_obj), reverse=True)
     return [post for _, post in ranked[:limit]]
@@ -191,10 +263,12 @@ def build_context(question: str, page_url: str = "", page_title: str = "") -> tu
     resume = read_resume()
     if resume:
         chunks.append("## Resume\n" + resume[:4000].strip())
-        sources.append({"type": "resume", "title": "CV", "url": SITE_BASE_URL + "/cv/"})
+        sources.append({"type": "resume", "title": "CV", "url": CV_URL})
 
-    for post in select_relevant_posts(question, page_url=page_url, page_title=page_title):
-        excerpt = post.content.strip()[:3500]
+    relevant_posts = select_relevant_posts(question, page_url=page_url, page_title=page_title)
+    for post in relevant_posts:
+        content = get_post_content(post.url)
+        excerpt = content.strip()[:3500]
         chunks.append(
             "\n".join(
                 [
@@ -216,7 +290,8 @@ def build_context(question: str, page_url: str = "", page_title: str = "") -> tu
             }
         )
 
-    return "\n\n".join(chunks).strip(), sources
+    context = "\n\n".join(chunks).strip()
+    return context, sources
 
 
 def _llm_config() -> tuple[str, str, str]:
@@ -270,22 +345,21 @@ def _sources_from_mcp_output(body: dict[str, Any]) -> list[dict[str, str]]:
 
         source: dict[str, str] | None = None
         if name == "get_resume":
-            source = {"type": "resume", "title": "CV", "url": SITE_BASE_URL + "/cv/"}
+            source = {"type": "resume", "title": "CV", "url": CV_URL}
         elif name == "get_post_content":
             raw_value = str(args.get("url_or_path") or "").strip()
             if raw_value:
-                source_url = raw_value
-                if not source_url.startswith("http"):
-                    source_url = SITE_BASE_URL.rstrip("/") + "/" + raw_value.strip("/").replace(".md", "/")
+                source_url = _absolute_url(raw_value)
                 source = {"type": "post", "title": raw_value, "url": source_url}
 
         if not source:
             continue
 
         dedupe_key = (source.get("type", ""), source.get("url", ""))
-        if dedupe_key not in seen:
-            seen.add(dedupe_key)
-            sources.append(source)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        sources.append(source)
 
     return sources
 
@@ -383,7 +457,10 @@ def _call_responses_with_remote_mcp(system_prompt: str, user_prompt: str) -> dic
     if not answer:
         raise RuntimeError("Responses API returned no output text.")
 
-    return {"answer": answer, "sources": _sources_from_mcp_output(body)}
+    return {
+        "answer": answer,
+        "sources": _sources_from_mcp_output(body),
+    }
 
 
 def answer_visitor_question(question: str, page_url: str = "", page_title: str = "") -> dict[str, Any]:
