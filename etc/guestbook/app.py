@@ -11,6 +11,7 @@ import requests
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
@@ -24,6 +25,13 @@ from blog_qa import (
     post_summary,
     read_resume,
 )
+
+
+def _split_env_list(name: str, default: list[str]) -> list[str]:
+    raw = os.getenv(name, "")
+    if not raw.strip():
+        return default
+    return [item.strip() for item in raw.split(",") if item.strip()]
 
 Base = declarative_base()
 
@@ -56,6 +64,25 @@ mcp = FastMCP(
         "answer_visitor_question 으로 블로그 방문자 질문에 답변할 수도 있습니다."
     ),
     streamable_http_path="/",
+    transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=_split_env_list(
+            "MCP_ALLOWED_HOSTS",
+            [
+                "lowfidev.cloud",
+                "localhost:8000",
+                "127.0.0.1:8000",
+            ],
+        ),
+        allowed_origins=_split_env_list(
+            "MCP_ALLOWED_ORIGINS",
+            [
+                "https://lowfidev.cloud",
+                "http://localhost:8000",
+                "http://127.0.0.1:8000",
+            ],
+        ),
+    ),
 )
 
 
