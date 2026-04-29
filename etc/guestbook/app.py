@@ -25,6 +25,7 @@ from blog_qa import (
     post_summary,
     read_resume,
     search_posts as search_blog_posts,
+    stream_visitor_question,
 )
 
 
@@ -227,19 +228,10 @@ def ask(req: AskReq, request: Request):
     )
     return result
 
-@app.post("/guestbook")
-def create(req: CreateReq):
-    session = Session()
-    try:
-        if req.parent_id is not None:
-            parent = session.query(Guestbook).filter(Guestbook.id == req.parent_id).first()
-            if not parent:
-                raise HTTPException(404, "parent not found")
-            if parent.page != req.page:
-                raise HTTPException(400, "parent page mismatch")
-        entry = Guestbook(
-            name=req.name,
-            pw_hash=hash_pw(req.password),
+            for event in stream_visitor_question(
+            ):
+                event_name = str(event.get("event") or "message")
+                yield f"event: {event_name}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
             message=req.message,
             page=req.page,
             created_at=datetime.utcnow(),
