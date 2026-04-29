@@ -448,6 +448,29 @@ def _sources_from_mcp_output(body: dict[str, Any]) -> list[dict[str, str]]:
     return sources
 
 
+def _tool_calls_from_mcp_output(body: dict[str, Any]) -> list[dict[str, Any]]:
+    calls: list[dict[str, Any]] = []
+
+    for item in body.get("output", []) or []:
+        if item.get("type") != "mcp_call":
+            continue
+
+        args_raw = item.get("arguments") or "{}"
+        try:
+            arguments = json.loads(args_raw) if isinstance(args_raw, str) else dict(args_raw)
+        except Exception:
+            arguments = {"_raw": str(args_raw)}
+
+        calls.append(
+            {
+                "tool": str(item.get("name") or ""),
+                "arguments": arguments,
+            }
+        )
+
+    return calls
+
+
 def _normalize_sources(sources: list[dict[str, str]]) -> list[dict[str, str]]:
     normalized: list[dict[str, str]] = []
     seen: set[tuple[str, str]] = set()
@@ -576,10 +599,12 @@ def _call_responses_with_remote_mcp(
         raise RuntimeError("Responses API returned no output text.")
 
     sources = _sources_from_mcp_output(body)
+    tool_calls = _tool_calls_from_mcp_output(body)
     normalized_sources = _normalize_sources(sources)
     return {
         "answer": answer,
         "sources": normalized_sources,
+        "tool_calls": tool_calls,
     }
 
 
