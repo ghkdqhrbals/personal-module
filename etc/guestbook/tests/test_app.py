@@ -1,6 +1,10 @@
 from collections import deque
+from pathlib import Path
+import sys
 
 from fastapi.testclient import TestClient
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import app as guestbook_app
 
