@@ -86,17 +86,20 @@ jobs:
 
           wait_for("http://127.0.0.1:8000/health")
 
+          mcp_ready = False
           for url in [
               "http://127.0.0.1:8000/mcp",
               "http://127.0.0.1:8000/mcp/",
           ]:
               try:
                   wait_for(url, accept_http_error=True, timeout_seconds=20)
-                  sys.exit(0)
+                  mcp_ready = True
+                  break
               except SystemExit as exc:
                   print(exc)
 
-          raise SystemExit("MCP endpoint did not respond successfully on /mcp or /mcp/")
+          if not mcp_ready:
+              raise SystemExit("MCP endpoint did not respond successfully on /mcp or /mcp/")
           PY
 
       - name: Dump container status on failure
