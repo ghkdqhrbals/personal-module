@@ -60,7 +60,7 @@ jobs:
         shell: bash
         run: |
           set -eo pipefail
-          python - <<'PY'
+          python3 - <<'PY'
           import time
           import sys
           import urllib.error
