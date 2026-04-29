@@ -3,13 +3,16 @@ import contextlib
 import hashlib
 import json
 import os
+import threading
 from datetime import datetime, timedelta, timezone
+from collections import defaultdict, deque
 from pathlib import Path
 from typing import Optional
 
 import requests
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel, Field
@@ -81,6 +84,9 @@ mcp = FastMCP(
             "MCP_ALLOWED_ORIGINS",
             [
                 "https://lowfidev.cloud",
+                "https://api.openai.com",
+                "https://chatgpt.com",
+                "https://platform.openai.com",
                 "http://localhost:8000",
                 "http://127.0.0.1:8000",
             ],
@@ -112,6 +118,11 @@ app.add_middleware(
 )
 app.mount("/mcp", mcp.streamable_http_app())
 
+ASK_RATE_LIMIT_PER_MINUTE = max(1, int(os.getenv("ASK_RATE_LIMIT_PER_MINUTE", "10")))
+ASK_RATE_LIMIT_WINDOW_SECONDS = 60
+_ask_rate_limit_lock = threading.Lock()
+_ask_rate_limit_hits: dict[str, deque[float]] = defaultdict(deque)
+
 def hash_pw(pw: str) -> str:
     return hashlib.sha256(pw.encode()).hexdigest()
 
@@ -139,6 +150,31 @@ class AskReq(BaseModel):
     question: str = Field(..., min_length=1, max_length=1500)
     page_url: str = ""
     page_title: str = ""
+
+
+def _client_ip(request: Request) -> str:
+    forwarded_for = (request.headers.get("x-forwarded-for") or "").strip()
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    real_ip = (request.headers.get("x-real-ip") or "").strip()
+    if real_ip:
+        return real_ip
+    return request.client.host if request.client else "unknown"
+
+
+def _enforce_ask_rate_limit(request: Request) -> None:
+    client_ip = _client_ip(request)
+    now = datetime.now().timestamp()
+
+    with _ask_rate_limit_lock:
+        hits = _ask_rate_limit_hits[client_ip]
+        while hits and now - hits[0] >= ASK_RATE_LIMIT_WINDOW_SECONDS:
+            hits.popleft()
+
+        if len(hits) >= ASK_RATE_LIMIT_PER_MINUTE:
+            raise HTTPException(429, f"Too many requests. Limit is {ASK_RATE_LIMIT_PER_MINUTE} per minute.")
+
+        hits.append(now)
 
 
 def _public_mcp_server_url(request: Request) -> str:
@@ -220,6 +256,7 @@ def health():
 
 @app.post("/ask")
 def ask(req: AskReq, request: Request):
+    _enforce_ask_rate_limit(request)
     result = answer_visitor_question(
         question=req.question,
         page_url=req.page_url,
@@ -228,10 +265,37 @@ def ask(req: AskReq, request: Request):
     )
     return result
 
+
+@app.post("/ask/stream")
+def ask_stream(req: AskReq, request: Request):
+    def event_stream():
+        try:
             for event in stream_visitor_question(
+                question=req.question,
+                page_url=req.page_url,
+                page_title=req.page_title,
+                remote_mcp_server_url=_public_mcp_server_url(request),
             ):
                 event_name = str(event.get("event") or "message")
                 yield f"event: {event_name}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+        except Exception as exc:
+            yield f"event: error\ndata: {json.dumps({'error': str(exc)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+@app.post("/guestbook")
+def create(req: CreateReq):
+    session = Session()
+    try:
+        if req.parent_id is not None:
+            parent = session.query(Guestbook).filter(Guestbook.id == req.parent_id).first()
+            if not parent:
+                raise HTTPException(404, "parent not found")
+            if parent.page != req.page:
+                raise HTTPException(400, "parent page mismatch")
+        entry = Guestbook(
+            name=req.name,
+            pw_hash=hash_pw(req.password),
             message=req.message,
             page=req.page,
             created_at=datetime.utcnow(),

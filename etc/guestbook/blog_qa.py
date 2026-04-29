@@ -472,6 +472,24 @@ def _tool_calls_from_mcp_output(body: dict[str, Any]) -> list[dict[str, Any]]:
     return calls
 
 
+def _parse_tool_arguments(args_raw: Any) -> dict[str, Any]:
+    try:
+        return json.loads(args_raw) if isinstance(args_raw, str) else dict(args_raw or {})
+    except Exception:
+        return {"_raw": str(args_raw)}
+
+
+def _mcp_call_key(event: dict[str, Any], item: dict[str, Any] | None = None) -> str:
+    if item:
+        item_id = str(item.get("id") or "")
+        if item_id:
+            return item_id
+    item_id = str(event.get("item_id") or "")
+    if item_id:
+        return item_id
+    return f"output:{event.get('output_index', '')}"
+
+
 def _normalize_sources(sources: list[dict[str, str]]) -> list[dict[str, str]]:
     normalized: list[dict[str, str]] = []
     seen: set[tuple[str, str]] = set()
@@ -650,48 +668,137 @@ def _stream_responses_with_remote_mcp(
     answer_chunks: list[str] = []
     tool_calls: list[dict[str, Any]] = []
     seen_tools: set[str] = set()
+    mcp_call_items: dict[str, dict[str, Any]] = {}
     final_response: dict[str, Any] | None = None
+
+    def emit_tool_call(tool_name: str, arguments: dict[str, Any]):
+        dedupe_key = json.dumps({"tool": tool_name, "arguments": arguments}, ensure_ascii=False, sort_keys=True)
+        if not tool_name or dedupe_key in seen_tools:
+            return None
+        seen_tools.add(dedupe_key)
+        tool_call = {"tool": tool_name, "arguments": arguments}
+        tool_calls.append(tool_call)
+        return {"event": "tool_call", "call_id": call_id, "tool_call": tool_call}
+
+    seen_event_types: list[str] = []
+    ignored_lines: list[str] = []
+
+    def handle_stream_event(event: dict[str, Any]) -> list[dict[str, Any]]:
+        event_type = str(event.get("type") or "")
+        if event_type:
+            seen_event_types.append(event_type)
+
+        emitted_events: list[dict[str, Any]] = []
+
+        if event_type == "error":
+            error = event.get("error") or event
+            raise RuntimeError(f"Responses API stream error: {json.dumps(error, ensure_ascii=False)}")
+        if event_type in {"response.failed", "response.incomplete"}:
+            response_body = event.get("response") or {}
+            error = response_body.get("error") or response_body.get("incomplete_details") or response_body
+            raise RuntimeError(f"Responses API {event_type}: {json.dumps(error, ensure_ascii=False)}")
+
+        if event_type == "response.output_text.delta":
+            delta = str(event.get("delta") or "")
+            if delta:
+                answer_chunks.append(delta)
+                emitted_events.append({"event": "answer_delta", "call_id": call_id, "delta": delta})
+        elif event_type == "response.output_text.done":
+            text = str(event.get("text") or "")
+            if text and not answer_chunks:
+                answer_chunks.append(text)
+                emitted_events.append({"event": "answer_delta", "call_id": call_id, "delta": text})
+        elif event_type == "response.output_item.added":
+            item = event.get("item") or {}
+            if item.get("type") == "mcp_call":
+                key = _mcp_call_key(event, item)
+                mcp_call_items[key] = {
+                    "tool": str(item.get("name") or ""),
+                    "arguments": _parse_tool_arguments(item.get("arguments") or "{}"),
+                }
+        elif event_type == "response.mcp_call_arguments.done":
+            key = _mcp_call_key(event)
+            cached = mcp_call_items.setdefault(key, {"tool": "", "arguments": {}})
+            cached["arguments"] = _parse_tool_arguments(event.get("arguments") or "{}")
+            emitted = emit_tool_call(str(cached.get("tool") or ""), cached["arguments"])
+            if emitted:
+                emitted_events.append(emitted)
+        elif event_type == "response.output_item.done":
+            item = event.get("item") or {}
+            if item.get("type") == "message" and not answer_chunks:
+                text = _extract_output_text({"output": [item]})
+                if text:
+                    answer_chunks.append(text)
+                    emitted_events.append({"event": "answer_delta", "call_id": call_id, "delta": text})
+            elif item.get("type") == "mcp_call":
+                key = _mcp_call_key(event, item)
+                cached = mcp_call_items.setdefault(key, {"tool": "", "arguments": {}})
+                cached["tool"] = str(item.get("name") or cached.get("tool") or "")
+                if "arguments" in item:
+                    cached["arguments"] = _parse_tool_arguments(item.get("arguments") or "{}")
+                emitted = emit_tool_call(str(cached.get("tool") or ""), cached.get("arguments") or {})
+                if emitted:
+                    emitted_events.append(emitted)
+        elif event_type == "response.completed":
+            response_body = event.get("response") or {}
+            if isinstance(response_body, dict):
+                final_response.update(response_body)
+
+        return emitted_events
+
+    final_response = {}
 
     try:
         with urllib.request.urlopen(req, timeout=120) as response:
+            data_lines: list[str] = []
             for raw_line in response:
-                line = raw_line.decode("utf-8", errors="replace").strip()
-                if not line.startswith("data: "):
+                line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
+                if line == "":
+                    if not data_lines:
+                        continue
+                    data = "\n".join(data_lines)
+                    data_lines = []
+                    if data == "[DONE]":
+                        break
+                    try:
+                        event = json.loads(data)
+                    except json.JSONDecodeError:
+                        ignored_lines.append(data)
+                        continue
+                    for emitted in handle_stream_event(event):
+                        yield emitted
                     continue
-                data = line[6:]
-                if data == "[DONE]":
-                    break
 
+                if line.startswith("data:"):
+                    data_lines.append(line[5:].lstrip())
+                    continue
+                if line.startswith(("event:", "id:", "retry:", ":")):
+                    continue
+
+                ignored_lines.append(line)
+
+            if data_lines:
+                data = "\n".join(data_lines)
+                if data != "[DONE]":
+                    try:
+                        event = json.loads(data)
+                    except json.JSONDecodeError:
+                        ignored_lines.append(data)
+                    else:
+                        for emitted in handle_stream_event(event):
+                            yield emitted
+
+            if not seen_event_types and ignored_lines:
+                body_text = "\n".join(ignored_lines).strip()
                 try:
-                    event = json.loads(data)
+                    body = json.loads(body_text)
                 except json.JSONDecodeError:
-                    continue
-
-                event_type = str(event.get("type") or "")
-
-                if event_type == "response.output_text.delta":
-                    delta = str(event.get("delta") or "")
-                    if delta:
-                        answer_chunks.append(delta)
-                        yield {"event": "answer_delta", "call_id": call_id, "delta": delta}
-                elif event_type == "response.output_item.added":
-                    item = event.get("item") or {}
-                    if item.get("type") == "mcp_call":
-                        tool_name = str(item.get("name") or "")
-                        args_raw = item.get("arguments") or "{}"
-                        try:
-                            arguments = json.loads(args_raw) if isinstance(args_raw, str) else dict(args_raw)
-                        except Exception:
-                            arguments = {"_raw": str(args_raw)}
-
-                        dedupe_key = json.dumps({"tool": tool_name, "arguments": arguments}, ensure_ascii=False, sort_keys=True)
-                        if dedupe_key not in seen_tools:
-                            seen_tools.add(dedupe_key)
-                            tool_call = {"tool": tool_name, "arguments": arguments}
-                            tool_calls.append(tool_call)
-                            yield {"event": "tool_call", "call_id": call_id, "tool_call": tool_call}
-                elif event_type == "response.completed":
-                    final_response = (event.get("response") or {})
+                    preview = body_text[:500]
+                    raise RuntimeError(f"Responses API returned non-SSE data: {preview}")
+                if isinstance(body, dict) and body.get("error"):
+                    raise RuntimeError(f"Responses API error: {json.dumps(body['error'], ensure_ascii=False)}")
+                if isinstance(body, dict):
+                    final_response.update(body)
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
         raise RuntimeError(f"Responses API error: HTTP {exc.code} - {detail}") from exc
@@ -699,12 +806,27 @@ def _stream_responses_with_remote_mcp(
         raise RuntimeError(f"Responses API connection error: {exc}") from exc
 
     answer = "".join(answer_chunks).strip()
-    if not answer and isinstance(final_response, dict):
+    if not answer:
         answer = _extract_output_text(final_response)
+        if answer:
+            yield {"event": "answer_delta", "call_id": call_id, "delta": answer}
 
     sources: list[dict[str, str]] = []
-    if isinstance(final_response, dict):
-        sources = _normalize_sources(_sources_from_mcp_output(final_response))
+    sources = _normalize_sources(_sources_from_mcp_output(final_response))
+    if not tool_calls:
+        for tool_call in _tool_calls_from_mcp_output(final_response):
+            emitted = emit_tool_call(str(tool_call.get("tool") or ""), tool_call.get("arguments") or {})
+            if emitted:
+                yield emitted
+
+    if not answer and not tool_calls:
+        status = str(final_response.get("status") or "")
+        error = final_response.get("error") or final_response.get("incomplete_details") or ""
+        event_summary = ", ".join(dict.fromkeys(seen_event_types)) or "none"
+        raise RuntimeError(
+            "Responses stream produced no answer or tool calls. "
+            f"status={status or '-'}, events={event_summary}, error={json.dumps(error, ensure_ascii=False)}"
+        )
 
     yield {
         "event": "done",
