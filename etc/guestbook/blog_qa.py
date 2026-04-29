@@ -867,6 +867,7 @@ def _stream_responses_with_remote_mcp(
     }
 
 
+
 def answer_visitor_question(
     question: str,
     page_url: str = "",
