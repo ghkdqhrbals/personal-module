@@ -12,6 +12,11 @@ on:
       - "etc/guestbook/**"
       - ".github/workflows/guestbook-tests.yml"
 
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -37,4 +42,13 @@ jobs:
         env:
           DATABASE_URL: sqlite:////tmp/guestbook-test.db
           PUBLIC_MCP_SERVER_URL: https://lowfidev.cloud/mcp/
-        run: pytest -q
+        run: pytest -q --junitxml=test-results/pytest.xml
+
+      - name: Publish test results
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        if: always()
+        with:
+          files: etc/guestbook/test-results/pytest.xml
+          check_name: Guestbook pytest
+          comment_mode: always
+          job_summary: true
