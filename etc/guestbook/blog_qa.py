@@ -4,6 +4,7 @@ import html
 import json
 import os
 import re
+import uuid
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -608,6 +609,115 @@ def _call_responses_with_remote_mcp(
     }
 
 
+def _stream_responses_with_remote_mcp(
+    system_prompt: str, user_prompt: str, remote_mcp_server_url: str = ""
+):
+    api_key, model, api_base = _llm_config()
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY 또는 LLM_API_KEY 환경변수가 필요합니다.")
+
+    remote_mcp_server_url = _resolve_remote_mcp_server_url(remote_mcp_server_url)
+    if not remote_mcp_server_url:
+        raise RuntimeError("PUBLIC_MCP_SERVER_URL 또는 REMOTE_MCP_SERVER_URL 환경변수가 필요합니다.")
+
+    payload = {
+        "model": model,
+        "instructions": system_prompt,
+        "input": user_prompt,
+        "stream": True,
+        "tools": [
+            {
+                "type": "mcp",
+                "server_label": "blog_mcp",
+                "server_url": remote_mcp_server_url,
+                "allowed_tools": REMOTE_MCP_ALLOWED_TOOLS,
+                "require_approval": "never",
+            }
+        ],
+    }
+
+    req = urllib.request.Request(
+        url=f"{api_base}/responses",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
+        method="POST",
+    )
+
+    call_id = str(uuid.uuid4())
+    answer_chunks: list[str] = []
+    tool_calls: list[dict[str, Any]] = []
+    seen_tools: set[str] = set()
+    final_response: dict[str, Any] | None = None
+
+    try:
+        with urllib.request.urlopen(req, timeout=120) as response:
+            for raw_line in response:
+                line = raw_line.decode("utf-8", errors="replace").strip()
+                if not line.startswith("data: "):
+                    continue
+                data = line[6:]
+                if data == "[DONE]":
+                    break
+
+                try:
+                    event = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+
+                event_type = str(event.get("type") or "")
+
+                if event_type == "response.output_text.delta":
+                    delta = str(event.get("delta") or "")
+                    if delta:
+                        answer_chunks.append(delta)
+                        yield {"event": "answer_delta", "call_id": call_id, "delta": delta}
+                elif event_type == "response.output_item.added":
+                    item = event.get("item") or {}
+                    if item.get("type") == "mcp_call":
+                        tool_name = str(item.get("name") or "")
+                        args_raw = item.get("arguments") or "{}"
+                        try:
+                            arguments = json.loads(args_raw) if isinstance(args_raw, str) else dict(args_raw)
+                        except Exception:
+                            arguments = {"_raw": str(args_raw)}
+
+                        dedupe_key = json.dumps({"tool": tool_name, "arguments": arguments}, ensure_ascii=False, sort_keys=True)
+                        if dedupe_key not in seen_tools:
+                            seen_tools.add(dedupe_key)
+                            tool_call = {"tool": tool_name, "arguments": arguments}
+                            tool_calls.append(tool_call)
+                            yield {"event": "tool_call", "call_id": call_id, "tool_call": tool_call}
+                elif event_type == "response.completed":
+                    final_response = (event.get("response") or {})
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Responses API error: HTTP {exc.code} - {detail}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Responses API connection error: {exc}") from exc
+
+    answer = "".join(answer_chunks).strip()
+    if not answer and isinstance(final_response, dict):
+        answer = _extract_output_text(final_response)
+
+    sources: list[dict[str, str]] = []
+    if isinstance(final_response, dict):
+        sources = _normalize_sources(_sources_from_mcp_output(final_response))
+
+    yield {
+        "event": "done",
+        "call_id": call_id,
+        "result": {
+            "answer": answer,
+            "sources": sources,
+            "tool_calls": tool_calls,
+            "mode": "responses_remote_mcp_stream",
+        },
+    }
+
+
 def answer_visitor_question(
     question: str,
     page_url: str = "",
@@ -654,3 +764,32 @@ def answer_visitor_question(
         "sources": normalized_sources,
         "mode": "chat_completions_context_fallback",
     }
+
+
+def stream_visitor_question(
+    question: str,
+    page_url: str = "",
+    page_title: str = "",
+    remote_mcp_server_url: str = "",
+):
+    clean_question = (question or "").strip()
+    if not clean_question:
+        raise ValueError("question is required")
+    if len(clean_question) > 1500:
+        raise ValueError("question is too long")
+
+    if not _use_remote_mcp_with_responses(remote_mcp_server_url):
+        raise RuntimeError("스트리밍은 remote MCP + Responses API 모드에서만 지원됩니다.")
+
+    system_prompt = (
+        "너는 황보규민의 블로그 방문자 질문을 대신 답변하는 AI다. "
+        "답변은 한국어로 작성한다. "
+        "가능하면 먼저 연결된 MCP 도구를 사용해서 필요한 정보만 찾아본 뒤 답한다. "
+        "특정 주제, 키워드, 기술명을 물으면 search_posts 를 우선 사용해 관련 글을 찾는다. "
+        "제공된 MCP 도구와 그 결과 안에서만 답하고, 추측이 필요한 경우에는 추측이라고 밝힌다. "
+        "정보가 없으면 모른다고 답한다."
+    )
+    user_prompt = _build_user_prompt(clean_question, page_url=page_url, page_title=page_title)
+    yield from _stream_responses_with_remote_mcp(
+        system_prompt, user_prompt, remote_mcp_server_url=remote_mcp_server_url
+    )
