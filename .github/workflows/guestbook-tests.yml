@@ -1,0 +1,40 @@
+name: Guestbook Tests
+
+on:
+  pull_request:
+    paths:
+      - "etc/guestbook/**"
+      - ".github/workflows/guestbook-tests.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "etc/guestbook/**"
+      - ".github/workflows/guestbook-tests.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: etc/guestbook
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: etc/guestbook/requirements-test.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements-test.txt
+
+      - name: Run tests
+        env:
+          DATABASE_URL: sqlite:////tmp/guestbook-test.db
+          PUBLIC_MCP_SERVER_URL: https://lowfidev.cloud/mcp/
+        run: pytest -q
