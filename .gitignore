@@ -41,3 +41,7 @@ out/
 
 ### Kotlin ###
 .kotlin
+
+### Env Files ###
+.env
+**/.env
