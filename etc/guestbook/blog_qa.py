@@ -18,6 +18,7 @@ CV_URL = os.getenv("BLOG_CV_URL", SITE_BASE_URL + "/cv/")
 SITE_ORIGIN = f"{urlparse(SITE_BASE_URL).scheme}://{urlparse(SITE_BASE_URL).netloc}"
 REMOTE_MCP_ALLOWED_TOOLS = [
     "get_recent_posts",
+    "search_posts",
     "get_post_content",
     "get_resume",
     "list_categories",
@@ -33,6 +34,7 @@ class PostRecord:
     category: str
     url: str
     file_path: str
+    search_text: str
     content: str
 
 
@@ -179,6 +181,18 @@ def _post_from_search_entry(entry: dict[str, Any]) -> PostRecord | None:
         category=category,
         url=url,
         file_path=urlparse(url).path,
+        search_text=_normalize_text(
+            " ".join(
+                [
+                    title,
+                    parent,
+                    category,
+                    raw_url,
+                    str(entry.get("content") or ""),
+                    str(entry.get("description") or ""),
+                ]
+            )
+        ),
         content="",
     )
 
@@ -199,6 +213,54 @@ def post_summary(post: PostRecord) -> dict[str, str]:
         "category": post.category,
         "url": post.url,
     }
+
+
+def _score_search_match(query_tokens: set[str], normalized_query: str, post: PostRecord) -> int:
+    haystack_tokens = _tokenize(post.search_text)
+    title_tokens = _tokenize(post.title)
+    category_tokens = _tokenize(post.category)
+    score = 0
+
+    score += len(query_tokens & haystack_tokens) * 3
+    score += len(query_tokens & title_tokens) * 6
+    score += len(query_tokens & category_tokens) * 4
+
+    normalized_title = _normalize_text(post.title)
+    normalized_category = _normalize_text(post.category)
+    normalized_parent = _normalize_text(post.parent)
+    normalized_path = _normalize_text(post.file_path)
+
+    if normalized_query and normalized_query in normalized_title:
+        score += 12
+    if normalized_query and normalized_query in normalized_category:
+        score += 8
+    if normalized_query and normalized_query in normalized_parent:
+        score += 5
+    if normalized_query and normalized_query in normalized_path:
+        score += 4
+
+    return score
+
+
+def search_posts(query: str, limit: int = 10) -> list[PostRecord]:
+    normalized_query = _normalize_text(query)
+    if not normalized_query:
+        return []
+
+    query_tokens = _tokenize(normalized_query)
+    if not query_tokens and normalized_query:
+        query_tokens = {normalized_query}
+
+    ranked: list[tuple[int, PostRecord]] = []
+    for post in collect_posts():
+        score = _score_search_match(query_tokens, normalized_query, post)
+        if score <= 0:
+            continue
+        ranked.append((score, post))
+
+    ranked.sort(key=lambda item: (item[0], item[1].date_obj), reverse=True)
+    bounded_limit = max(1, min(limit, 50))
+    return [post for _, post in ranked[:bounded_limit]]
 
 
 def read_resume() -> str:
@@ -535,6 +597,7 @@ def answer_visitor_question(
         "너는 황보규민의 블로그 방문자 질문을 대신 답변하는 AI다. "
         "답변은 한국어로 작성한다. "
         "가능하면 먼저 연결된 MCP 도구를 사용해서 필요한 정보만 찾아본 뒤 답한다. "
+        "특정 주제, 키워드, 기술명을 물으면 search_posts 를 우선 사용해 관련 글을 찾는다. "
         "제공된 MCP 도구와 그 결과 안에서만 답하고, 추측이 필요한 경우에는 추측이라고 밝힌다. "
         "정보가 없으면 모른다고 답한다. "
         "답변 끝에는 짧게 핵심만 정리하고, 필요한 경우 참고한 글 제목이나 이력서를 언급한다."
