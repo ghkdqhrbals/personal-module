@@ -119,10 +119,23 @@ def _fetch_text(url: str) -> str:
 
 def _absolute_url(value: str) -> str:
     if value.startswith("http://") or value.startswith("https://"):
-        return value
+        return _canonicalize_url(value)
     if value.startswith("/"):
-        return urljoin(SITE_ORIGIN, value)
-    return urljoin(SITE_BASE_URL + "/", value.lstrip("/"))
+        return _canonicalize_url(urljoin(SITE_ORIGIN, value))
+    return _canonicalize_url(urljoin(SITE_BASE_URL + "/", value.lstrip("/")))
+
+
+def _canonicalize_url(url: str) -> str:
+    parsed = urlparse(url.strip())
+    if not parsed.scheme or not parsed.netloc:
+        return url.strip()
+
+    path = parsed.path or ""
+    if path not in {"", "/"}:
+        path = path.rstrip("/")
+
+    normalized = parsed._replace(path=path)
+    return normalized.geturl()
 
 
 def _extract_search_data(html_text: str) -> list[dict[str, Any]]:
@@ -589,6 +602,8 @@ def answer_visitor_question(
         "제공된 MCP 도구와 그 결과 안에서만 답하고, 추측이 필요한 경우에는 추측이라고 밝힌다. "
         "정보가 없으면 모른다고 답한다. "
         "참고 링크를 포함할 때는 반드시 Markdown 링크 형식 [제목](URL) 만 사용하고, 생 URL은 쓰지 않는다. "
+        "링크가 필요하면 [링크](URL) 같은 일반 라벨 대신 글 제목 자체를 링크로 만든다. "
+        "URL 끝의 불필요한 trailing slash 는 제거된 형태를 사용한다. "
         "답변 말미에 관련 포스팅이나 이력서를 언급할 때는 가능하면 Markdown 링크로 직접 연결한다. "
         "답변 끝에는 짧게 핵심만 정리한다."
     )
