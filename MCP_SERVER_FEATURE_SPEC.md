@@ -44,6 +44,36 @@ Purpose:
 - Confirms the FastAPI app is running
 - Used by deployment monitoring
 
+### Visitor Q&A Streaming Endpoint
+
+- Method: `POST`
+- Path: `/ask/stream`
+- Content-Type: `application/json`
+- Response: `text/event-stream` (SSE)
+
+Request body:
+
+```json
+{
+  "question": "Redis Stream pending이 뭐야?",
+  "page_url": "https://ghkdqhrbals.github.io/portfolios/docs/...",
+  "page_title": "Redis Stream 모니터링"
+}
+```
+
+SSE events:
+
+- `answer_delta`: 모델 답변 토큰/문자열 증분
+- `tool_call`: MCP tool 호출 정보 (`tool`, `arguments`)
+- `done`: 최종 집계 결과 (`answer`, `sources`, `tool_calls`, `mode`)
+- `error`: 처리 중 오류
+
+Notes:
+
+- `/ask/stream` 는 OpenAI Responses API의 streaming 응답을 프론트로 relay 한다.
+- `tool_call` 이벤트는 모델이 실제 MCP tool 호출을 추가하는 시점에 전달된다.
+- 스트리밍 모드는 remote MCP URL이 설정된 경우(`PUBLIC_MCP_SERVER_URL` 또는 `REMOTE_MCP_SERVER_URL`)에 동작한다.
+
 ### MCP Transport Endpoint
 
 - Base path: `/mcp/`
