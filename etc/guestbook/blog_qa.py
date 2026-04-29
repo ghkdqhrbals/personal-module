@@ -301,8 +301,16 @@ def _llm_config() -> tuple[str, str, str]:
     return api_key, model, api_base
 
 
-def _use_remote_mcp_with_responses() -> bool:
-    return bool((os.getenv("REMOTE_MCP_SERVER_URL") or "").strip())
+def _resolve_remote_mcp_server_url(explicit_remote_mcp_server_url: str = "") -> str:
+    return (
+        explicit_remote_mcp_server_url.strip()
+        or (os.getenv("PUBLIC_MCP_SERVER_URL") or "").strip()
+        or (os.getenv("REMOTE_MCP_SERVER_URL") or "").strip()
+    )
+
+
+def _use_remote_mcp_with_responses(explicit_remote_mcp_server_url: str = "") -> bool:
+    return bool(_resolve_remote_mcp_server_url(explicit_remote_mcp_server_url))
 
 
 def _build_user_prompt(question: str, page_url: str = "", page_title: str = "") -> str:
@@ -410,14 +418,16 @@ def _call_chat_completion(system_prompt: str, user_prompt: str) -> str:
     raise RuntimeError("AI provider returned an unsupported response format.")
 
 
-def _call_responses_with_remote_mcp(system_prompt: str, user_prompt: str) -> dict[str, Any]:
+def _call_responses_with_remote_mcp(
+    system_prompt: str, user_prompt: str, remote_mcp_server_url: str = ""
+) -> dict[str, Any]:
     api_key, model, api_base = _llm_config()
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY 또는 LLM_API_KEY 환경변수가 필요합니다.")
 
-    remote_mcp_server_url = (os.getenv("REMOTE_MCP_SERVER_URL") or "").strip()
+    remote_mcp_server_url = _resolve_remote_mcp_server_url(remote_mcp_server_url)
     if not remote_mcp_server_url:
-        raise RuntimeError("REMOTE_MCP_SERVER_URL 환경변수가 필요합니다.")
+        raise RuntimeError("PUBLIC_MCP_SERVER_URL 또는 REMOTE_MCP_SERVER_URL 환경변수가 필요합니다.")
 
     payload = {
         "model": model,
@@ -463,7 +473,12 @@ def _call_responses_with_remote_mcp(system_prompt: str, user_prompt: str) -> dic
     }
 
 
-def answer_visitor_question(question: str, page_url: str = "", page_title: str = "") -> dict[str, Any]:
+def answer_visitor_question(
+    question: str,
+    page_url: str = "",
+    page_title: str = "",
+    remote_mcp_server_url: str = "",
+) -> dict[str, Any]:
     clean_question = (question or "").strip()
     if not clean_question:
         raise ValueError("question is required")
@@ -480,8 +495,10 @@ def answer_visitor_question(question: str, page_url: str = "", page_title: str =
     )
     user_prompt = _build_user_prompt(clean_question, page_url=page_url, page_title=page_title)
 
-    if _use_remote_mcp_with_responses():
-        result = _call_responses_with_remote_mcp(system_prompt, user_prompt)
+    if _use_remote_mcp_with_responses(remote_mcp_server_url):
+        result = _call_responses_with_remote_mcp(
+            system_prompt, user_prompt, remote_mcp_server_url=remote_mcp_server_url
+        )
         result["mode"] = "responses_remote_mcp"
         return result
 

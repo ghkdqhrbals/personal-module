@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 import requests
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
@@ -132,6 +132,30 @@ class UpdateReq(BaseModel):
     message: str = Field(..., max_length=500)
 
 
+class AskReq(BaseModel):
+    question: str = Field(..., min_length=1, max_length=1500)
+    page_url: str = ""
+    page_title: str = ""
+
+
+def _public_mcp_server_url(request: Request) -> str:
+    configured_url = (
+        os.getenv("PUBLIC_MCP_SERVER_URL")
+        or os.getenv("REMOTE_MCP_SERVER_URL")
+        or ""
+    ).strip()
+    if configured_url:
+        return configured_url.rstrip("/") + "/"
+
+    base_url = str(request.base_url).rstrip("/")
+    if "localhost" in base_url or "127.0.0.1" in base_url:
+        raise HTTPException(
+            500,
+            "PUBLIC_MCP_SERVER_URL 환경변수가 필요합니다. OpenAI가 접근할 수 있는 공개 /mcp URL을 설정하세요.",
+        )
+    return f"{base_url}/mcp/"
+
+
 @mcp.tool()
 def get_recent_posts(limit: int = 10, category: str = "") -> str:
     limit = max(1, min(limit, 100))
@@ -180,6 +204,17 @@ def resource_categories() -> str:
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.post("/ask")
+def ask(req: AskReq, request: Request):
+    result = answer_visitor_question(
+        question=req.question,
+        page_url=req.page_url,
+        page_title=req.page_title,
+        remote_mcp_server_url=_public_mcp_server_url(request),
+    )
+    return result
 
 @app.post("/guestbook")
 def create(req: CreateReq):
