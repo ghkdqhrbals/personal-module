@@ -472,30 +472,6 @@ def _tool_calls_from_mcp_output(body: dict[str, Any]) -> list[dict[str, Any]]:
     return calls
 
 
-def _format_tool_call_line(tool_call: dict[str, Any]) -> str:
-    tool_name = str(tool_call.get("tool") or "").strip()
-    if not tool_name:
-        return ""
-
-    arguments = tool_call.get("arguments")
-    if isinstance(arguments, dict) and arguments:
-        args = ", ".join(f"{key}={value!r}" for key, value in arguments.items())
-        return f"tools... {tool_name}({args})\n"
-    return f"tools... {tool_name}()\n"
-
-
-def _prepend_tool_call_lines(answer: str, tool_calls: list[dict[str, Any]]) -> str:
-    lines = [_format_tool_call_line(tool_call).strip() for tool_call in tool_calls]
-    lines = [line for line in lines if line]
-    if not lines:
-        return answer
-
-    prefix = "\n".join(lines)
-    if answer.startswith(prefix):
-        return answer
-    return f"{prefix}\n{answer}".strip()
-
-
 def _parse_tool_arguments(args_raw: Any) -> dict[str, Any]:
     try:
         return json.loads(args_raw) if isinstance(args_raw, str) else dict(args_raw or {})
@@ -643,7 +619,6 @@ def _call_responses_with_remote_mcp(
 
     sources = _sources_from_mcp_output(body)
     tool_calls = _tool_calls_from_mcp_output(body)
-    answer = _prepend_tool_call_lines(answer, tool_calls)
     normalized_sources = _normalize_sources(sources)
     return {
         "answer": answer,
@@ -703,12 +678,8 @@ def _stream_responses_with_remote_mcp(
         seen_tools.add(dedupe_key)
         tool_call = {"tool": tool_name, "arguments": arguments}
         tool_calls.append(tool_call)
-        line = _format_tool_call_line(tool_call)
-        if line:
-            answer_chunks.append(line)
         return [
             {"event": "tool_call", "call_id": call_id, "tool_call": tool_call},
-            {"event": "answer_delta", "call_id": call_id, "delta": line},
         ]
 
     seen_event_types: list[str] = []
