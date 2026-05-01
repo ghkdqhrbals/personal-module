@@ -113,3 +113,22 @@ def test_ask_rate_limit_expires_old_hits(monkeypatch):
 
     assert response.status_code == 200
     assert list(guestbook_app._ask_rate_limit_hits["203.0.113.14"]) == [1060.0]
+
+
+def test_ask_stream_rate_limit_rejects_second_request_from_same_ip(monkeypatch):
+    monkeypatch.setattr(guestbook_app, "ASK_RATE_LIMIT_PER_MINUTE", 1)
+    monkeypatch.setattr(guestbook_app, "_public_mcp_server_url", lambda request: "https://lowfidev.cloud/mcp/")
+    monkeypatch.setattr(
+        guestbook_app,
+        "stream_visitor_question",
+        lambda **kwargs: iter([{"event": "done", "result": _stub_answer(**kwargs)}]),
+    )
+    client = TestClient(guestbook_app.app)
+    headers = {"X-Forwarded-For": "203.0.113.15"}
+
+    first = client.post("/ask/stream", json=_ask_payload("first"), headers=headers)
+    second = client.post("/ask/stream", json=_ask_payload("second"), headers=headers)
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert second.json()["detail"] == "Too many requests. Limit is 1 per minute."

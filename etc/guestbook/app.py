@@ -268,6 +268,8 @@ def ask(req: AskReq, request: Request):
 
 @app.post("/ask/stream")
 def ask_stream(req: AskReq, request: Request):
+    _enforce_ask_rate_limit(request)
+
     def event_stream():
         try:
             for event in stream_visitor_question(
