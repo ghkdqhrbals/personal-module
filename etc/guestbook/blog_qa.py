@@ -101,9 +101,35 @@ def _normalize_text(value: str) -> str:
     return re.sub(r"\s+", " ", (value or "").strip()).lower()
 
 
-def _tokenize(value: str) -> set[str]:
-    text = _normalize_text(value)
+TECH_TERM_ALIASES: tuple[tuple[str, ...], ...] = (
+    ("coroutine", "coroutines", "코루틴"),
+    ("virtualthread", "virtual", "가상스레드", "가상"),
+    ("thread", "threads", "스레드"),
+)
+
+
+def _split_camel_case(value: str) -> str:
+    return re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", value or "")
+
+
+def _expand_alias_tokens(tokens: set[str], normalized_text: str) -> set[str]:
+    expanded = set(tokens)
+    for aliases in TECH_TERM_ALIASES:
+        normalized_aliases = {_normalize_text(alias) for alias in aliases}
+        alias_tokens = set().union(*(_tokenize_plain(alias) for alias in normalized_aliases))
+        if tokens & alias_tokens or any(alias in normalized_text for alias in normalized_aliases):
+            expanded.update(alias_tokens)
+    return expanded
+
+
+def _tokenize_plain(value: str) -> set[str]:
+    text = _normalize_text(_split_camel_case(value))
     return {token for token in re.split(r"[^0-9a-zA-Z가-힣]+", text) if len(token) >= 2}
+
+
+def _tokenize(value: str) -> set[str]:
+    normalized_text = _normalize_text(value)
+    return _expand_alias_tokens(_tokenize_plain(value), normalized_text)
 
 
 def _fetch_text(url: str) -> str:
