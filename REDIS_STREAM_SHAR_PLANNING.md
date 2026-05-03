@@ -377,7 +377,94 @@ MVP는 plain Rendezvous Hashing을 사용한다.
 
 ## 11. Scale In / Scale Out
 
-### 11.1 Scale Out
+### 11.1 Rebalance Trigger
+
+rebalance는 별도 coordinator가 명령하지 않는다.
+각 instance가 synchronized consumer view 변화를 감지하면 shard owner를 다시 계산한다.
+
+trigger:
+
+* 새 instance heartbeat 등록
+* 기존 instance heartbeat TTL 만료
+* instance state가 `ACTIVE`에서 `DRAINING`으로 변경
+* stream metadata version 변경
+* assignment algorithm/seed 변경. 단, 같은 stream version 안에서는 변경 금지
+
+view가 바뀌면 각 instance는 다음 세트를 계산한다.
+
+```text
+currentOwnedShards = lease를 보유하고 read 중인 shard
+nextOwnedShards = newView 기준 owner(instanceId) == self 인 shard
+
+shardsToKeep = currentOwnedShards ∩ nextOwnedShards
+shardsToReturn = currentOwnedShards - nextOwnedShards
+shardsToAcquire = nextOwnedShards - currentOwnedShards
+```
+
+처리 순서:
+
+1. `shardsToReturn` 신규 read 중단
+2. `shardsToKeep` lease renew 지속
+3. `shardsToAcquire` lease 획득 시도
+4. 반환 완료 또는 lease 만료 후 새 owner가 pending recovery
+5. 새 owner가 신규 read 시작
+
+### 11.2 Shard Return Protocol
+
+shard 반환은 graceful return과 forced return으로 나눈다.
+
+graceful return:
+
+1. worker가 해당 shard를 `RETURNING` 상태로 바꾼다.
+2. 해당 shard에 대한 새 `XREADGROUP >` 호출을 중단한다.
+3. 이미 읽어 handler 실행 중인 message는 timeout 안에서 완료한다.
+4. 성공한 message는 processing metadata를 `PROCESSED`로 기록한 뒤 `XACK`한다.
+5. 실패한 message는 retry/DLQ 정책을 따른다.
+6. in-flight message가 0이 되면 shard lease renew를 중단한다.
+7. 가능하면 lease value에 `state=RELEASING`을 기록하고 TTL을 짧게 줄인다.
+8. 새 owner는 release marker를 보고 짧아진 TTL 만료를 기다린 뒤 lease 획득을 시도한다.
+
+forced return:
+
+* process crash, SIGKILL, node failure에서는 graceful return이 불가능하다.
+* heartbeat TTL과 shard lease TTL이 만료될 때까지 기존 owner로 간주될 수 있다.
+* 새 owner는 lease 획득 후 PEL recovery를 먼저 수행한다.
+* 이 경로에서는 at-least-once 재전달이 발생할 수 있으므로 idempotency가 필수이다.
+
+반환 중 금지:
+
+* in-flight handler가 남아 있는데 lease를 즉시 삭제하지 않는다.
+* 반환 중인 shard에서 신규 message를 읽지 않는다.
+* owner가 아닌 shard의 pending message를 reclaim하지 않는다.
+* release marker만 보고 side effect fencing을 생략하지 않는다.
+
+### 11.3 Shard Acquire Protocol
+
+새 owner는 자신이 owner라고 계산한 shard에 대해 lease 획득을 시도한다.
+
+절차:
+
+1. 현재 synchronized view에서 자신이 owner인지 확인한다.
+2. 기존 lease가 있으면 TTL 만료 또는 release marker를 기다린다.
+3. `SET NX PX`로 shard lease 획득을 시도한다.
+4. lease 획득 시 `leaseToken`, `metadataVersion`, `membershipEpoch`을 기록한다.
+5. pending recovery를 먼저 수행한다.
+6. recovery가 끝나면 `XREADGROUP ... >`로 신규 message read를 시작한다.
+7. read loop 중 lease renew 실패 또는 view mismatch가 발생하면 즉시 read를 중단한다.
+
+acquire backoff:
+
+* lease 획득 실패 시 짧은 jitter backoff 후 재시도한다.
+* 모든 instance가 동시에 같은 shard에 대해 spin하지 않도록 shard별 backoff를 둔다.
+* backoff는 `renew-interval`보다 짧고 `lease-ttl`보다 충분히 작아야 한다.
+
+handoff timeout:
+
+* graceful return이 `handoff-timeout` 안에 끝나지 않으면 기존 owner는 신규 read 중단 상태를 유지하고 lease renew를 중단한다.
+* 새 owner는 lease TTL 만료 후 forced acquire 경로로 들어간다.
+* timeout 이후 남은 in-flight message는 Redis PEL recovery와 idempotency로 처리한다.
+
+### 11.4 Scale Out
 
 새 instance가 시작되면 registry에 heartbeat를 등록한다.
 다른 instance들은 registry refresh 후 active member set에 새 instance를 포함한다.
@@ -387,23 +474,26 @@ Rendezvous Hashing 결과가 바뀐 shard만 이동 대상이 된다.
 
 1. 새 instance가 `ACTIVE`로 등록된다.
 2. 모든 instance가 다음 refresh에서 새 member set을 본다.
-3. 기존 owner 중 더 이상 owner가 아닌 instance는 해당 shard lease 갱신을 중단하고 `DRAINING`한다.
-4. 새 owner는 shard lease 획득을 시도한다.
-5. lease 획득 후 pending recovery를 먼저 수행한다.
-6. 신규 message read를 시작한다.
+3. 기존 owner는 `shardsToReturn`을 계산한다.
+4. 기존 owner는 반환 대상 shard의 신규 read를 중단한다.
+5. 기존 owner는 in-flight message를 완료한 뒤 lease renew를 중단한다.
+6. 새 owner는 `shardsToAcquire`에 대해 lease 획득을 시도한다.
+7. 새 owner는 lease 획득 후 pending recovery를 먼저 수행한다.
+8. 새 owner는 신규 message read를 시작한다.
 
-### 11.2 Scale In
+### 11.5 Scale In
 
 instance가 정상 종료되면 먼저 `DRAINING` 상태로 바꾼다.
 
 절차:
 
 1. 종료 대상 instance가 registry state를 `DRAINING`으로 바꾼다.
-2. 맡고 있던 shard의 신규 read를 중단한다.
-3. 처리 중 message를 완료하고 ACK한다.
-4. shard lease 갱신을 중단한다.
-5. 다른 instance가 owner로 계산한 shard lease를 획득한다.
-6. 종료 대상 instance는 heartbeat를 삭제하거나 TTL 만료를 기다린다.
+2. `DRAINING` instance는 assignment candidate에서 제외된다.
+3. 남은 instance들은 새 view로 owner를 다시 계산한다.
+4. 종료 대상 instance는 모든 owned shard를 graceful return한다.
+5. 남은 instance들은 반환된 shard lease를 획득한다.
+6. 새 owner는 pending recovery 후 신규 read를 시작한다.
+7. 종료 대상 instance는 모든 shard 반환 후 heartbeat를 삭제하거나 TTL 만료를 기다린다.
 
 강제 종료:
 
@@ -412,7 +502,7 @@ instance가 정상 종료되면 먼저 `DRAINING` 상태로 바꾼다.
 * shard lease TTL 만료 후 새 owner가 lease를 획득한다.
 * pending recovery 후 신규 read를 시작한다.
 
-### 11.3 이동량
+### 11.6 이동량
 
 Rendezvous Hashing은 instance 증감 시 전체 shard를 재분배하지 않는다.
 추가/제거된 instance와 관련된 shard만 주로 이동한다.
@@ -459,6 +549,7 @@ lease value:
   "leaseToken": 42,
   "metadataVersion": 4,
   "membershipEpoch": "6d3a...",
+  "state": "OWNED",
   "expiresAt": "2026-05-01T10:00:20Z"
 }
 ```
@@ -470,6 +561,9 @@ lease value:
 * owner가 아니면 갱신하지 않는다.
 * renew 시 `metadataVersion`과 `membershipEpoch`이 현재 local view와 같아야 한다.
 * lease 갱신 실패 시 해당 shard의 신규 read를 즉시 중단한다.
+* graceful return 중에는 lease state를 `RELEASING`으로 바꿀 수 있다.
+* `RELEASING`은 새 owner에게 lease TTL 만료가 가까워졌다는 신호를 주기 위한 hint이다.
+* lease token과 TTL이 최종 권한 기준이며, release marker만으로 소유권을 넘기지 않는다.
 * handler side effect 전후로 가능하면 lease token을 processing metadata에 기록한다.
 * lease는 중복 read 시간을 줄이는 fencing 장치이다.
 * 최종 중복 side effect 방지는 idempotency와 processing state가 담당한다.
@@ -690,6 +784,7 @@ redis-stream:
   shard-lease:
     ttl: 20s
     renew-interval: 5s
+    handoff-timeout: 30s
 
   pending:
     reclaim-enabled: true
@@ -717,6 +812,9 @@ redis-stream:
 * `redis_stream_lease_acquired_total`
 * `redis_stream_lease_lost_total`
 * `redis_stream_lease_renew_failed_total`
+* `redis_stream_shard_returning`
+* `redis_stream_shard_acquire_retry_total`
+* `redis_stream_shard_handoff_duration`
 * `redis_stream_assignment_snapshot_version`
 * `redis_stream_messages_read_total`
 * `redis_stream_messages_ack_total`
