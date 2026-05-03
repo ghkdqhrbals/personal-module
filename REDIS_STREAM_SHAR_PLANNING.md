@@ -3,25 +3,25 @@
 ## 0. 고려사항 요약
 
 1. Redis Stream은 Kafka처럼 broker가 partition assignment를 관리하지 않으므로, 애플리케이션 레벨에서 shard ownership을 정해야 한다.
-2. **중앙 Group Coordinator 제거**: 직접 구현하면 leader election, stale leader fencing, assignment plan 전파, partial rebalance 복구까지 책임져야 하므로 유지보수 비용이 크다.
-3. **Synchronized consumer view**: 모든 instance가 같은 view로 shard owner를 deterministic하게 계산한다.
-4. **Rendezvous Hashing 기반 scale in/out**: 전체 shard를 재분배하지 않고 변경된 instance와 관련된 shard만 이동시킨다.
-5. **Consumer view 동기화 기준**: consumer들은 `metadataVersion`, `assignmentConfigVersion`, `membershipEpoch`, 정렬된 active instance 목록을 기준으로 같은 view를 공유해야 한다.
-6. **Rolling deploy config compatibility**: rolling deploy 중 서로 다른 yaml/config를 가진 instance가 공존할 수 있으므로, shard owner 계산에 영향을 주는 설정은 `assignment_config_version`으로 관리한다.
-7. **Config mismatch 격리**: `assignment_config_version`이 맞지 않는 instance는 `DEGRADED`로 등록하고 assignment candidate에서 제외한다.
-8. **Local-only config 분리**: `active-threads`, batch size, block timeout 같은 설정은 instance마다 달라도 shard owner 계산에 영향을 주면 안 된다.
-9. **Shard lease fencing**: 실제 read 권한은 shard lease로 fencing한다. owner로 계산되더라도 lease를 얻지 못하면 `XREADGROUP`을 수행하지 않는다.
-10. **Shard handoff on scale in/out**: shard 반환은 신규 read 중단, in-flight 처리 완료, lease renew 중단, 새 owner acquire 순서로 진행한다.
-11. **Forced handoff fallback**: graceful handoff가 timeout 안에 끝나지 않으면 lease TTL 만료 후 forced acquire로 전환하고, PEL recovery와 idempotency로 복구한다.
-12. **Shard-level ordering**: 하나의 shard는 하나의 worker만 읽고, 같은 shard의 handler를 병렬 실행하지 않는다.
-13. **Pending recovery ordering**: pending recovery도 shard owner의 단일 worker만 수행하며, pending message를 먼저 처리한 뒤 신규 message read를 재개한다.
+2. **중앙 Group Coordinator를 직접 구현하면 leader election, stale leader fencing, assignment plan 전파, partial rebalance 복구까지 책임져야 하므로 유지보수 비용이 크다.**
+3. **본 설계는 중앙 Coordinator를 두지 않고, 모든 instance가 같은 synchronized consumer view로 shard owner를 deterministic하게 계산한다.**
+4. **shard owner 계산은 Rendezvous Hashing을 기본으로 사용해 scale in/out 시 전체 shard를 재분배하지 않고 변경된 instance와 관련된 shard만 이동시킨다.**
+5. **consumer들은 `metadataVersion`, `assignmentConfigVersion`, `membershipEpoch`, 정렬된 active instance 목록을 기준으로 같은 view를 공유해야 한다.**
+6. **rolling deploy 중 서로 다른 yaml/config를 가진 instance가 공존할 수 있으므로, shard owner 계산에 영향을 주는 설정은 `assignment_config_version`으로 관리한다.**
+7. **`assignment_config_version`이 맞지 않는 instance는 `DEGRADED`로 등록하고 assignment candidate에서 제외한다.**
+8. **`active-threads`, batch size, block timeout 같은 local-only 설정은 instance마다 달라도 shard owner 계산에 영향을 주면 안 된다.**
+9. **실제 read 권한은 shard lease로 fencing한다. owner로 계산되더라도 lease를 얻지 못하면 `XREADGROUP`을 수행하지 않는다.**
+10. **scale in/out 시 shard 반환은 신규 read 중단, in-flight 처리 완료, lease renew 중단, 새 owner acquire 순서로 진행한다.**
+11. **graceful handoff가 timeout 안에 끝나지 않으면 lease TTL 만료 후 forced acquire로 전환하고, PEL recovery와 idempotency로 복구한다.**
+12. **shard 단위 순서를 보장하기 위해 하나의 shard는 하나의 worker만 읽고, 같은 shard의 handler를 병렬 실행하지 않는다.**
+13. **pending recovery도 shard owner의 단일 worker만 수행하며, pending message를 먼저 처리한 뒤 신규 message read를 재개한다.**
 14. consumer delivery는 `XREADGROUP` 후 정상 처리 완료 시 `XACK`하는 at-least-once 방식만 사용한다. `NOACK`은 사용하지 않는다.
 15. producer retry로 인한 중복 stream entry는 Redis 8.6+ `XADD IDMP {producerName} {idempotencyKey}`로 방지한다.
 16. `IDMPAUTO`는 사용하지 않고, producer가 business event 단위 idempotency key를 직접 생성하고 retry 시 같은 key를 재사용한다.
-17. **Stream metadata snapshot cache**: producer, consumer, assignment 계산은 모두 metadata store의 stream metadata를 기준으로 하며, hot path에서는 immutable snapshot cache를 사용한다.
-18. **Immutable partitioning metadata**: shard count, partition key schema, partition hash algorithm, assignment algorithm은 같은 stream version 안에서 불변이다.
-19. **Versioned migration**: shard count나 hash/assignment algorithm을 바꿔야 하면 새 stream version을 만들고 dual-read/write 및 backlog drain 절차로 전환한다.
-20. **Managed metadata store**: stream metadata, runtime instance registry, processing state, idempotency key, retry/DLQ 기록과 retention 정책이 필요하다.
+17. **producer, consumer, assignment 계산은 모두 metadata store의 stream metadata를 기준으로 하며, hot path에서는 immutable snapshot cache를 사용한다.**
+18. **shard count, partition key schema, partition hash algorithm, assignment algorithm은 같은 stream version 안에서 불변이다.**
+19. **shard count나 hash/assignment algorithm을 바꿔야 하면 새 stream version을 만들고 dual-read/write 및 backlog drain 절차로 전환한다.**
+20. **metadata store에는 stream metadata, runtime instance registry, processing state, idempotency key, retry/DLQ 기록과 retention 정책이 필요하다.**
 
 ---
 
