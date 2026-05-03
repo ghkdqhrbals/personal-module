@@ -697,6 +697,79 @@ Group Coordinator를 두더라도 shard lease는 유지한다.
 * coordinator 장애나 network pause 중 stale assignment를 가진 Pod가 읽는 것을 줄인다.
 * assignment plan은 의도한 owner를 정하고, shard lease는 실제 read 권한을 fencing한다.
 
+8.2.1 Coordinator 장애와 Failover
+
+master coordinator가 갑자기 죽는 경우를 반드시 고려한다.
+
+장애 예시:
+
+1. coordinator Pod가 SIGKILL, node down, OOM 등으로 즉시 종료된다.
+2. coordinator lease renew가 중단된다.
+3. follower Pod들은 ASSIGNMENT_UPDATED event를 더 이상 받지 못한다.
+4. 기존 shard owner Pod들은 이미 획득한 shard lease가 살아 있는 동안 기존 assignment로 계속 consume한다.
+5. coordinator-ttl이 지나면 coordinator lease가 만료된다.
+6. 살아 있는 Pod 중 하나가 coordinator lease를 획득한다.
+7. 새 coordinator가 coordinatorEpoch을 증가시킨다.
+8. 새 coordinator가 pod registry snapshot과 기존 assignment plan을 읽는다.
+9. 새 coordinator가 Sticky Balanced Assignment를 재계산한다.
+10. 새 assignment generation을 저장하고 ASSIGNMENT_UPDATED event를 publish한다.
+11. follower Pod들은 새 generation을 읽고 rebalance를 수행한다.
+
+중요한 원칙:
+
+* coordinator가 죽어도 기존 shard owner가 즉시 consume을 멈출 필요는 없다.
+* shard lease가 살아 있는 동안은 기존 owner가 read를 계속할 수 있다.
+* coordinator failover 동안 새 assignment 생성만 일시 중단된다.
+* 실제 read 권한은 shard lease가 fencing하므로 stale coordinator가 만든 오래된 assignment만으로는 read할 수 없다.
+
+coordinator epoch fencing:
+
+assignment plan에는 coordinatorEpoch과 generation을 반드시 포함한다.
+
+Pod는 assignment plan을 적용하기 전에 다음을 확인한다.
+
+* assignmentPlan.coordinatorEpoch >= localObservedCoordinatorEpoch
+* assignmentPlan.generation >= localAppliedGeneration
+* assignmentPlan.membershipFingerprint가 현재 registry snapshot과 호환됨
+
+더 낮은 epoch 또는 generation의 assignment plan은 stale plan으로 보고 무시한다.
+
+Split brain 방지:
+
+* coordinator lease 갱신은 owner token을 비교한 뒤 수행한다.
+* lease owner가 아닌 Pod는 assignment plan을 overwrite하지 않는다.
+* 가능하면 coordinator lease 갱신과 assignment plan 저장은 Lua script로 owner token을 검증한 뒤 수행한다.
+
+예시 Lua 조건:
+
+if GET coordinatorKey.owner == currentPodUid then
+  SET assignmentPlanKey newPlan
+  PEXPIRE coordinatorKey ttl
+else
+  return STALE_COORDINATOR
+end
+
+Failover 시간:
+
+coordinator-failover-delay <= coordinator-ttl + coordinator-election-latency
+
+기본값이 coordinator.ttl = 15s이면 coordinator가 갑자기 죽어도 약 15초 + 선출 시간 후 새 coordinator가 assignment를 다시 생성한다.
+
+Follower 동작:
+
+* assignment plan이 오래되어도 shard lease가 유효하면 기존 shard consume을 계속한다.
+* assignment plan age가 max-assignment-staleness를 초과하면 새 shard lease 획득은 중단한다.
+* 기존 in-flight 처리는 ACK까지 마무리한다.
+* coordinator failover가 끝나 새 generation을 받으면 정상 rebalance한다.
+
+설정:
+
+redis-stream:
+coordinator:
+ttl: 15s
+renew-interval: 5s
+max-assignment-staleness: 30s
+
 8.3 Pod State Machine
 
 Kafka consumer group 상태를 참고해 Pod 상태를 다음처럼 정의한다.
@@ -1473,6 +1546,10 @@ heartbeat-ttl: 15s
 rebalance-interval: 5s
 lease-ttl: 20s
 lease-renew-interval: 5s
+coordinator:
+ttl: 15s
+renew-interval: 5s
+max-assignment-staleness: 30s
 ack:
 mode: ACK_ONLY
 pending:
@@ -1776,6 +1853,19 @@ pod_state
 3. 해당 Pod는 새 shard lease를 획득하지 않고 DEGRADED 상태로 전환한다.
 4. redis_stream_assignment_degraded metric과 log로 설정 부족을 노출한다.
 5. 운영자는 Pod 수를 늘리거나 active-threads 설정을 증가시켜 재배포한다.
+
+22.8 Coordinator 갑작스러운 종료
+
+1. coordinator Pod가 OOM, node down, SIGKILL 등으로 즉시 죽는다.
+2. coordinator lease renew가 중단된다.
+3. 기존 shard owner들은 shard lease가 살아 있는 동안 기존 assignment로 consume을 계속한다.
+4. coordinator-ttl이 지나 coordinator lease가 만료된다.
+5. 살아 있는 Pod 중 하나가 새 coordinator로 선출된다.
+6. 새 coordinator가 coordinatorEpoch을 증가시킨다.
+7. 새 coordinator가 pod registry snapshot과 이전 assignment plan을 읽는다.
+8. Sticky Balanced Assignment로 새 generation을 만든다.
+9. follower Pod들이 새 assignment plan을 적용한다.
+10. stale epoch/generation의 assignment plan은 무시한다.
 
 ⸻
 
