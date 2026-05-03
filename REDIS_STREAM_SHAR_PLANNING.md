@@ -4,13 +4,6 @@
 
 Redis Stream을 여러 stream shard로 나누고, 여러 runtime instance가 shard를 중복 없이 나눠 읽도록 지원하는 Spring Boot/Kotlin 공통 모듈을 만든다.
 
-runtime instance는 실행 단위이다.
-
-* Kubernetes 환경: Pod
-* VM 환경: process
-* bare-metal 환경: process
-* local/dev 환경: application instance
-
 Redis Stream은 Kafka처럼 broker가 partition assignment와 rebalance를 관리하지 않는다.
 이전 설계는 Group Coordinator를 두고 leader election, assignment plan 저장, follower 적용까지 구현하는 방향이었다.
 
@@ -32,8 +25,8 @@ Redis Stream은 Kafka처럼 broker가 partition assignment와 rebalance를 관�
 * shard 단위 순서 보장
 * scale-in/out 시 자동 shard 재분배
 * 별도 coordinator leader election 제거
-* Pod 없는 환경에서도 동일하게 동작
 * producer와 consumer가 같은 partitioning metadata를 사용
+* rolling deploy 중 서로 다른 설정을 가진 instance가 공존해도 안전하게 동작
 * Redis Stream consumer delivery는 `XREADGROUP` + 정상 처리 후 `XACK`
 * producer retry 중복은 Redis 8.6+ `XADD IDMP`로 방지
 * 운영자가 이해하고 장애 대응할 수 있는 단순한 상태 모델 제공
@@ -223,14 +216,13 @@ order-api:host-a:12345:1714700000:worker-1
 
 ### 9.1 Instance Identity
 
-shard assignment의 기준은 Pod가 아니라 `instanceId`이다.
+shard assignment의 기준은 `instanceId`이다.
 
 생성 규칙:
 
-* Kubernetes: `podUid` 우선, 없으면 `podName`
-* VM/bare-metal: `{hostName}:{processId}:{startTime}`
-* local/dev: `{application}:{randomUuid}`
+* 기본값: `{application}:{hostName}:{processId}:{startTime}`
 * 수동 지정: `redis-stream.instance.id`
+* platform이 안정적인 instance unique id를 제공하면 그 값을 사용한다.
 
 같은 consumer group 안에서 `instanceId`는 중복되면 안 된다.
 중복이 감지되면 나중에 등록한 instance를 `DEGRADED`로 두고 assignment 대상에서 제외한다.
@@ -249,7 +241,8 @@ redis-stream:registry:{module}:{consumerGroup}:instances:{instanceId}
 {
   "application": "order-api",
   "instanceId": "host-a:12345:1714700000",
-  "identitySource": "HOST_PROCESS",
+  "configVersion": "2026-05-03.1",
+  "assignmentConfigVersion": 3,
   "state": "ACTIVE",
   "lastSeenAt": "2026-05-01T10:00:10Z",
   "metadataVersion": 4
@@ -274,9 +267,47 @@ assignment candidate 조건:
 * heartbeat TTL 안에 갱신됨
 * 같은 `streamPrefix`, `streamVersion`, `consumerGroup`을 사용
 * metadata version이 호환됨
+* assignment config version이 호환됨
 
 `DRAINING` instance는 registry에는 남아 있지만 새 owner 계산에서는 제외한다.
 그래야 scale-in 때 다른 instance가 해당 shard의 새 owner로 계산될 수 있다.
+
+### 9.3 Rolling Deploy와 Config Compatibility
+
+rolling deploy 중에는 서로 다른 yaml 설정으로 뜬 instance가 공존할 수 있다.
+예를 들어 새 instance는 scale-out 설정을 포함하고 있지만, 기존 instance는 아직 이전 설정으로 동작할 수 있다.
+이 구간을 고려하지 않으면 같은 shard에 대해 서로 다른 owner 계산이 발생한다.
+
+설정은 두 종류로 나눈다.
+
+assignment-affecting config:
+
+* `stream-version`
+* `assignment.strategy`
+* `assignment.hash-seed`
+* `membership.heartbeat-ttl`
+* `shard-lease.ttl`
+* `shard-lease.renew-interval`
+* shard ownership 계산에 영향을 주는 모든 값
+
+local-only config:
+
+* `consumer.active-threads`
+* `consumer.batch-size`
+* `consumer.block-timeout`
+* metric/export 설정
+
+정책:
+
+* assignment-affecting config는 yaml만으로 각 instance가 임의 적용하면 안 된다.
+* metadata store에 `assignment_config_version`과 canonical assignment config를 저장한다.
+* instance는 시작 시 local yaml과 metadata store의 assignment config를 비교한다.
+* 다르면 `DEGRADED`로 등록하고 assignment candidate에서 제외한다.
+* rolling deploy 중에는 구버전/신버전 instance가 공존할 수 있지만, assignment candidate는 같은 `assignment_config_version`을 가진 instance만 포함한다.
+* 최종적으로 모든 instance가 같은 config version으로 수렴한 뒤 새 version을 active로 올린다.
+
+local-only config는 instance마다 달라도 shard owner 계산에 영향을 주지 않는다.
+예를 들어 `active-threads`가 instance마다 달라도 자신이 소유한 shard를 내부 worker에 어떻게 나눌지만 달라질 뿐, shard owner 자체는 바뀌면 안 된다.
 
 ---
 
@@ -308,6 +339,7 @@ consumerView =
   streamPrefix
   streamVersion
   metadataVersion
+  assignmentConfigVersion
   membershipEpoch
   assignmentAlgorithm
   assignmentHashSeed
@@ -320,7 +352,7 @@ consumerView =
 * assignment candidate 조건을 만족하는 instance만 고른다.
 * `instanceId`를 정렬해 canonical member list를 만든다.
 * member list의 hash를 계산한다.
-* `membershipEpoch = hash(metadataVersion, assignmentAlgorithm, assignmentHashSeed, sortedInstanceIds)`로 만든다.
+* `membershipEpoch = hash(metadataVersion, assignmentConfigVersion, assignmentAlgorithm, assignmentHashSeed, sortedInstanceIds)`로 만든다.
 
 `membershipEpoch`에는 local clock이나 snapshot 조회 시각을 넣지 않는다.
 같은 member list를 본 consumer들이 서로 다른 epoch을 만들면 불필요한 lease churn이 발생한다.
@@ -548,6 +580,7 @@ lease value:
   "workerId": "worker-0",
   "leaseToken": 42,
   "metadataVersion": 4,
+  "assignmentConfigVersion": 3,
   "membershipEpoch": "6d3a...",
   "state": "OWNED",
   "expiresAt": "2026-05-01T10:00:20Z"
@@ -559,7 +592,7 @@ lease value:
 * `SET key value NX PX ttl`로 최초 획득한다.
 * renew는 owner와 token이 일치할 때만 Lua로 갱신한다.
 * owner가 아니면 갱신하지 않는다.
-* renew 시 `metadataVersion`과 `membershipEpoch`이 현재 local view와 같아야 한다.
+* renew 시 `metadataVersion`, `assignmentConfigVersion`, `membershipEpoch`이 현재 local view와 같아야 한다.
 * lease 갱신 실패 시 해당 shard의 신규 read를 즉시 중단한다.
 * graceful return 중에는 lease state를 `RELEASING`으로 바꿀 수 있다.
 * `RELEASING`은 새 owner에게 lease TTL 만료가 가까워졌다는 신호를 주기 위한 hint이다.
@@ -672,14 +705,13 @@ Redis Hash/JSON은 로컬 또는 경량 환경에서만 선택한다.
 stream_runtime_instance
   consumer_group
   instance_id
-  identity_source
   application
   host
   process_id
-  pod_name       # Kubernetes optional
-  pod_uid        # Kubernetes optional
   state
   metadata_version
+  assignment_config_version
+  config_version
   last_seen_at
 
 stream_message_processing
@@ -749,6 +781,11 @@ redis-stream:
     refresh-interval: 30s
     fail-on-mismatch: true
 
+  config:
+    version: "2026-05-03.1"
+    assignment-config-source: METADATA_STORE
+    fail-on-assignment-config-mismatch: true
+
   membership:
     heartbeat-interval: 5s
     heartbeat-ttl: 15s
@@ -809,6 +846,8 @@ redis-stream:
 * `redis_stream_active_instances`
 * `redis_stream_owned_shards`
 * `redis_stream_membership_epoch`
+* `redis_stream_assignment_config_version`
+* `redis_stream_config_mismatch_total`
 * `redis_stream_lease_acquired_total`
 * `redis_stream_lease_lost_total`
 * `redis_stream_lease_renew_failed_total`
