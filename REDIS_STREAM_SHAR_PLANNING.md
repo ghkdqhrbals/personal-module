@@ -21,7 +21,8 @@ Redis Stream은 Kafka처럼 partition assignment와 rebalance를 broker가 대�
 * DLQ
 * processing metadata 관리
 * producer idempotency 선택
-* consumer delivery mode 선택
+* consumer group join/rebalance
+* shard 단위 순서 보장
 * 기본 metric
 
 Redis Stream의 중복 방지는 producer와 consumer를 분리해서 봐야 한다.
@@ -35,19 +36,14 @@ producer 측 중복 방지:
 
 consumer 측 delivery:
 
-* 기본 모드: `XREADGROUP` + `XACK`
-  * Redis는 message를 PEL(Pending Entries List)에 넣는다.
-  * consumer가 처리 후 `XACK`하기 전 죽으면 message는 pending으로 남아 reclaim될 수 있다.
-  * consumer delivery 관점에서는 at-least-once이다.
-* `NOACK` 모드: `XREADGROUP ... NOACK`
-  * Redis는 message를 PEL에 넣지 않는다.
-  * 읽는 순간 ACK된 것과 동일하게 취급된다.
-  * consumer가 읽은 뒤 처리 전에 죽으면 message는 유실될 수 있다.
-  * 대신 같은 message가 Redis consumer group에서 재전달되지 않는다.
+* `XREADGROUP`으로 읽고 정상 처리 후 `XACK`한다.
+* Redis는 message를 PEL(Pending Entries List)에 넣는다.
+* consumer가 처리 후 `XACK`하기 전 죽으면 message는 pending으로 남아 reclaim될 수 있다.
+* consumer delivery 관점에서는 at-least-once이다.
+* `NOACK`은 사용하지 않는다.
 
 따라서 producer retry로 인한 중복 stream entry를 막으려면 `XADD IDMP`를 사용한다.
-consumer 처리 유실보다 재전달 방지가 더 중요할 때만 `NOACK`을 사용한다.
-유실 방지가 우선이면 `XACK` 기반 at-least-once 모드를 사용하고, handler는 idempotent해야 한다.
+consumer는 유실 방지를 우선해 `XACK` 기반 at-least-once 모드만 사용하고, handler는 idempotent해야 한다.
 
 외부 시스템 side effect까지 포함한 "정확히 한 번 처리"는 Redis Stream 옵션만으로 만들 수 없다.
 그 경우 외부 시스템도 idempotency key 또는 transaction을 지원해야 한다.
@@ -72,19 +68,20 @@ Consumer Instance
   -> shard lease 획득
   -> Redis XREADGROUP
   -> handler 처리
-  -> delivery mode에 따라 XACK 또는 NOACK
+  -> 성공 후 XACK
 ```
 
 핵심 정책:
 
 * shard는 runtime instance 단위로 먼저 나눈다.
 * 하나의 shard는 하나의 instance만 owner가 될 수 있다.
-* instance 내부에서는 `active-threads`를 할당받은 shard들에 나눠 배정한다.
-* shard마다 최소 1개 thread가 있어야 한다.
+* shard owner instance 안에서도 하나의 shard는 하나의 worker thread만 읽는다.
+* 순서 보장은 shard 단위로만 제공한다.
+* 순서 보장이 필요한 key는 같은 shard로 routing되어야 한다.
 * instance 증감 시 기존 shard owner는 가능한 유지한다. Kafka `StickyAssignor`와 같은 방향이다.
 * 실제 read 권한은 shard lease로 fencing한다.
 * producer 중복 생성 방지는 `XADD IDMP` / `IDMPAUTO`로 선택한다.
-* consumer 재전달 정책은 `XACK` / `NOACK`으로 선택한다.
+* consumer는 정상 처리 후 `XACK`한다.
 
 ---
 
@@ -164,6 +161,37 @@ XGROUP CREATE notification:v1:2 notification-consumer $ MKSTREAM
 ```
 
 기본 start id는 `$`이다. 기존 backlog까지 읽어야 하는 경우에만 `0-0`을 사용한다.
+
+### 4.1 Group Join
+
+각 runtime instance는 시작 시 consumer group에 join한다.
+
+join 절차:
+
+1. instance identity를 만든다.
+2. metadata store에 runtime instance heartbeat를 등록한다.
+3. instance state를 `JOINING`으로 바꾼다.
+4. coordinator가 active member snapshot을 읽는다.
+5. coordinator가 generation을 증가시키고 shard assignment plan을 만든다.
+6. instance는 자기 shard assignment를 받으면 `COMPLETING_REBALANCE`로 전환한다.
+7. shard lease를 획득한 뒤 `STABLE`로 전환하고 consume을 시작한다.
+
+Kafka처럼 broker가 group membership을 관리해주지 않으므로, 이 모듈이 metadata store와 coordinator lease로 group join/rebalance를 구현한다.
+
+### 4.2 Partition Ownership
+
+이 문서에서 partition은 Redis stream shard와 같다.
+
+정책:
+
+* 하나의 partition은 같은 generation 안에서 정확히 하나의 runtime instance에만 배정된다.
+* 하나의 partition은 해당 owner instance 안에서 정확히 하나의 worker thread만 읽는다.
+* worker는 assigned partition을 `XREADGROUP`으로 읽고, handler 정상 처리 후 `XACK`한다.
+* 같은 partition에 대해 병렬 handler 실행을 하지 않는다.
+* partition owner가 바뀔 때는 기존 owner가 `DRAINING` 후 shard lease를 놓고, 새 owner가 lease를 획득한 뒤 읽는다.
+
+이 정책으로 Redis stream shard 내부의 message 순서를 보장한다.
+전체 stream shard 간 global ordering은 보장하지 않는다.
 
 ---
 
@@ -309,7 +337,7 @@ Follower instance는 assignment를 직접 확정하지 않는다. 저장된 assi
 따라서 신규 stream 기능을 사용하려면 metadata store를 먼저 구성해야 한다.
 
 metadata store가 없는 모드는 단일 instance 개발 환경에서만 허용한다.
-이 경우 shard assignment, consumer cleanup, delivery mode 관리 보장은 제공하지 않는다.
+이 경우 shard assignment, consumer cleanup, group join/rebalance 보장은 제공하지 않는다.
 
 관리할 metadata:
 
@@ -405,27 +433,9 @@ XCFGSET {streamKey} IDMP-DURATION 300 IDMP-MAXSIZE 1000
 ```
 
 이 기능은 producer side의 at-most-once production을 만든다.
-consumer가 읽은 뒤 재전달되는지 여부는 아래 consumer delivery mode가 결정한다.
+consumer가 읽은 뒤 재전달되는지 여부는 아래 consumer delivery 정책이 결정한다.
 
-### 8.2 Consumer AT_MOST_ONCE
-
-Redis `XREADGROUP`을 `NOACK` 옵션과 함께 사용한다.
-
-```redis
-XREADGROUP GROUP {groupName} {consumerName} COUNT {count} BLOCK {blockMs} NOACK STREAMS {streamKey} >
-```
-
-특징:
-
-* message를 PEL에 넣지 않는다.
-* 별도 `XACK`가 필요 없다.
-* consumer가 읽은 뒤 처리 전에 죽으면 message는 유실될 수 있다.
-* Redis consumer group 관점에서 같은 message를 다시 전달하지 않는다.
-* pending recovery, retry, DLQ는 적용할 수 없다.
-
-이 모드는 "중복 서빙 방지"가 "유실 방지"보다 중요할 때 사용한다.
-
-### 8.3 Consumer AT_LEAST_ONCE
+### 8.2 Consumer Delivery
 
 Redis `XREADGROUP`을 `NOACK` 없이 사용하고, 처리 성공 후 `XACK`한다.
 
@@ -440,10 +450,11 @@ XREADGROUP GROUP {groupName} {consumerName} COUNT {count} BLOCK {blockMs} STREAM
 * consumer가 죽으면 message는 pending으로 남고 reclaim될 수 있다.
 * 같은 message가 재전달될 수 있으므로 handler는 idempotent해야 한다.
 * pending recovery, retry, DLQ를 사용할 수 있다.
+* `NOACK`은 사용하지 않는다.
 
-### 8.4 Idempotent Processing
+### 8.3 Idempotent Processing
 
-Consumer AT_LEAST_ONCE 모드에서 중복 side effect를 막아야 하면 metadata store와 idempotency key를 사용한다.
+consumer 재전달로 인한 중복 side effect를 막아야 하면 metadata store와 idempotency key를 사용한다.
 
 처리 흐름:
 
@@ -679,37 +690,43 @@ consumer:
 규칙:
 
 * instance가 shard를 하나도 받지 않으면 thread를 만들지 않는다.
-* instance가 shard를 받으면 최대 `active-threads`개 thread를 만든다.
-* 각 shard는 최소 1개 thread의 read 대상에 포함되어야 한다.
-* `active-threads < assignedShardCount`이면 하나의 thread가 여러 shard를 round-robin으로 읽는다.
-* `active-threads >= assignedShardCount`이면 남는 thread는 shard에 균등하게 추가 배정한다.
+* instance가 shard를 받으면 최대 `active-threads`개 worker thread를 만든다.
+* 하나의 shard는 정확히 하나의 worker thread에만 배정한다.
+* 한 worker thread는 여러 shard를 순차적으로 읽을 수 있다.
+* `active-threads > assignedShardCount`이면 남는 thread는 만들지 않는다.
+* shard 하나에 worker thread를 2개 이상 붙이지 않는다.
 
 예:
 
 ```text
 assigned shards = 6, 7, 8, 9
-active-threads = 6
+active-threads = 2
 
 shard 6 -> thread-0
-shard 7 -> thread-1
-shard 8 -> thread-2, thread-3
-shard 9 -> thread-4, thread-5
+shard 7 -> thread-0
+shard 8 -> thread-1
+shard 9 -> thread-1
 ```
 
 주의:
 
-* 한 shard에 thread가 2개 이상이면 shard 내부 처리 순서는 보장되지 않는다.
-* shard 내부 strict ordering이 필요하면 `active-threads == assignedShardCount`가 되도록 운영해야 한다.
-* `active-threads < assignedShardCount`에서는 thread 하나가 여러 shard를 맡기 때문에 shard별 처리량이 낮아질 수 있다.
+* 같은 shard의 message는 같은 worker thread에서 순차 처리한다.
+* 한 worker가 여러 shard를 맡아도 shard별 처리 순서는 worker 내부에서 보장한다.
+* shard 간 순서는 보장하지 않는다.
+* shard별 handler 처리는 동시에 실행하지 않는다.
 
 ---
 
 ## 14. Pending Recovery / Retry / DLQ
 
-이 섹션은 `delivery-mode: AT_LEAST_ONCE`에서만 적용한다.
-`AT_MOST_ONCE`는 `NOACK`을 사용하므로 message가 PEL에 남지 않는다.
-
 Redis Stream은 consumer가 죽으면 message를 PEL에 남긴다. 모듈은 PEL recovery와 metadata store의 processing state를 함께 사용한다.
+
+순서 보장 정책:
+
+* pending recovery도 shard owner instance의 단일 worker만 수행한다.
+* recovery 중에는 해당 shard의 신규 message read를 잠시 멈춘다.
+* pending message를 먼저 처리하고 ACK한 뒤 신규 message read를 재개한다.
+* 처리 실패 message를 건너뛰고 뒤 message를 먼저 ACK하면 shard 내부 순서 보장이 깨질 수 있다.
 
 Recovery:
 
@@ -829,7 +846,8 @@ redis-stream:
     active-threads: 4
     batch-size: 50
     block-timeout: 2s
-    delivery-mode: AT_MOST_ONCE
+    ack-mode: ACK_AFTER_SUCCESS
+    ordering: SHARD
 
   producer:
     idempotency:
@@ -901,14 +919,16 @@ redis-stream:
 * stream shard routing
 * XADD IDMP / IDMPAUTO producer idempotency
 * consumer group initialization
+* consumer group join/rebalance
 * runtime instance identity 관리
 * Redis lease 기반 Group Coordinator
 * metadata store 기반 processing state 관리
-* consumer AT_MOST_ONCE / AT_LEAST_ONCE delivery mode
+* XREADGROUP + ACK_AFTER_SUCCESS consumer processing
 * Sticky Balanced Assignment
 * shard lease fencing
-* `active-threads` 기반 instance 내부 thread 분배
-* XADD IDMP / XREADGROUP / NOACK / XACK
+* shard 단위 순서 보장
+* `active-threads` 기반 instance 내부 worker thread 분배
+* XADD IDMP / XREADGROUP / XACK
 * XAUTOCLAIM pending recovery
 * DLQ
 * dead consumer cleanup
