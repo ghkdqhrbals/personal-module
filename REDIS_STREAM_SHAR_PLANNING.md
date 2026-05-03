@@ -1,99 +1,184 @@
 # Redis Stream Sharded Consumer Module 설계
 
-## 1. 목적
+## 0. 고려사항 요약
 
-Redis Stream을 여러 stream shard로 나누고, 여러 Pod가 shard를 중복 없이 나눠 읽도록 지원하는 Spring Boot/Kotlin 공통 모듈을 만든다.
-
-Redis Stream은 Kafka처럼 partition assignment와 rebalance를 broker가 대신 해주지 않는다. 따라서 이 모듈은 다음 책임만 애플리케이션 레벨에서 제공한다.
-
-* producer shard routing
-* consumer group 초기화
-* Pod 간 shard assignment
-* Pod 내부 consumer thread 분배
-* pending message recovery
-* DLQ
-* 기본 metric
-
-본 모듈은 Redis Stream의 at-least-once delivery를 전제로 한다. 사용자 handler는 idempotent해야 한다.
+1. Redis Stream은 Kafka처럼 broker가 partition assignment를 관리하지 않으므로, 애플리케이션 레벨에서 shard ownership을 정해야 한다.
+2. **중앙 Group Coordinator를 직접 구현하면 leader election, stale leader fencing, assignment plan 전파, partial rebalance 복구까지 책임져야 하므로 유지보수 비용이 크다.**
+3. **본 설계는 중앙 Coordinator를 두지 않고, 모든 instance가 같은 synchronized consumer view로 shard owner를 deterministic하게 계산한다.**
+4. **shard owner 계산은 Rendezvous Hashing을 기본으로 사용해 scale in/out 시 전체 shard를 재분배하지 않고 변경된 instance와 관련된 shard만 이동시킨다.**
+5. **consumer들은 `metadataVersion`, `assignmentConfigVersion`, `membershipEpoch`, 정렬된 active instance 목록을 기준으로 같은 view를 공유해야 한다.**
+6. **rolling deploy 중 서로 다른 yaml/config를 가진 instance가 공존할 수 있으므로, shard owner 계산에 영향을 주는 설정은 `assignment_config_version`으로 관리한다.**
+7. **`assignment_config_version`이 맞지 않는 instance는 `DEGRADED`로 등록하고 assignment candidate에서 제외한다.**
+8. **`active-threads`, batch size, block timeout 같은 local-only 설정은 instance마다 달라도 shard owner 계산에 영향을 주면 안 된다.**
+9. **실제 read 권한은 shard lease로 fencing한다. owner로 계산되더라도 lease를 얻지 못하면 `XREADGROUP`을 수행하지 않는다.**
+10. **scale in/out 시 shard 반환은 신규 read 중단, in-flight 처리 완료, lease renew 중단, 새 owner acquire 순서로 진행한다.**
+11. **graceful handoff가 timeout 안에 끝나지 않으면 lease TTL 만료 후 forced acquire로 전환하고, PEL recovery와 idempotency로 복구한다.**
+12. **shard 단위 순서를 보장하기 위해 하나의 shard는 하나의 worker만 읽고, 같은 shard의 handler를 병렬 실행하지 않는다.**
+13. **pending recovery도 shard owner의 단일 worker만 수행하며, pending message를 먼저 처리한 뒤 신규 message read를 재개한다.**
+14. consumer delivery는 `XREADGROUP` 후 정상 처리 완료 시 `XACK`하는 at-least-once 방식만 사용한다. `NOACK`은 사용하지 않는다.
+15. producer retry로 인한 중복 stream entry는 Redis 8.6+ `XADD IDMP {producerName} {idempotencyKey}`로 방지한다.
+16. `IDMPAUTO`는 사용하지 않고, producer가 business event 단위 idempotency key를 직접 생성하고 retry 시 같은 key를 재사용한다.
+17. **producer, consumer, assignment 계산은 모두 metadata store의 stream metadata를 기준으로 하며, hot path에서는 immutable snapshot cache를 사용한다.**
+18. **shard count, partition key schema, partition hash algorithm, assignment algorithm은 같은 stream version 안에서 불변이다.**
+19. **shard count나 hash/assignment algorithm을 바꿔야 하면 새 stream version을 만들고 dual-read/write 및 backlog drain 절차로 전환한다.**
+20. **metadata store에는 stream metadata, runtime instance registry, processing state, idempotency key, retry/DLQ 기록과 retention 정책이 필요하다.**
 
 ---
 
-## 2. 핵심 설계 요약
+## 1. Context
+
+Redis Stream을 여러 stream shard로 나누고, 여러 runtime instance가 shard를 중복 없이 나눠 읽도록 지원하는 Spring Boot/Kotlin 공통 모듈을 만든다.
+
+Redis Stream은 Kafka처럼 broker가 partition assignment와 rebalance를 관리하지 않는다.
+이전 설계는 Group Coordinator를 두고 leader election, assignment plan 저장, follower 적용까지 구현하는 방향이었다.
+
+대기업 운영 관점에서는 이 구조의 유지보수 비용이 크다.
+
+* coordinator leader election 자체가 장애 지점이 된다.
+* assignment plan, coordinator epoch, shard lease, instance state가 서로 맞아야 한다.
+* scale-in/out, stale leader, split-brain, partial assignment 적용을 모두 테스트해야 한다.
+* Kafka의 group coordinator를 애플리케이션 레벨에서 다시 만드는 형태가 된다.
+
+따라서 본 설계는 중앙 Coordinator를 두지 않는다.
+대신 모든 instance가 같은 active member snapshot과 같은 assignment algorithm을 사용해 자신이 맡을 shard를 독립적으로 계산한다.
+중복 read 방지는 shard lease가 담당한다.
+
+---
+
+## 2. Goals
+
+* shard 단위 순서 보장
+* scale-in/out 시 자동 shard 재분배
+* 별도 coordinator leader election 제거
+* producer와 consumer가 같은 partitioning metadata를 사용
+* rolling deploy 중 서로 다른 설정을 가진 instance가 공존해도 안전하게 동작
+* Redis Stream consumer delivery는 `XREADGROUP` + 정상 처리 후 `XACK`
+* producer retry 중복은 Redis 8.6+ `XADD IDMP`로 방지
+* 운영자가 이해하고 장애 대응할 수 있는 단순한 상태 모델 제공
+
+---
+
+## 3. Non-Goals
+
+* global ordering
+* Kafka 수준의 broker-managed consumer group 구현
+* 동적 shard-count 변경
+* Redis Cluster resharding 자동 대응
+* hot shard 자동 split
+* 외부 side effect까지 포함한 절대적 exactly-once
+
+---
+
+## 4. Proposed Architecture
 
 ```text
 Producer
-  -> shardKey hash
+  -> stream metadata cache 조회
+  -> partition key hash
   -> stream:{version}:{shardIndex}
+  -> XADD IDMP producerName idempotencyKey
 
-Group Coordinator
-  -> active Pod 목록 확인
-  -> Sticky Balanced Assignment 생성
-  -> assignment plan 저장
-
-Consumer Pod
-  -> 자기 Pod에 배정된 shard 확인
-  -> shard lease 획득
-  -> Redis XREADGROUP
-  -> handler 처리
+Runtime Instance
+  -> instance registry heartbeat 등록
+  -> active member snapshot 조회
+  -> Rendezvous Hashing으로 shard owner 계산
+  -> 자신이 owner로 계산한 shard lease 획득
+  -> shard별 단일 worker로 XREADGROUP
+  -> handler 정상 처리
   -> XACK
 ```
 
 핵심 정책:
 
-* shard는 Pod 단위로 먼저 나눈다.
-* 하나의 shard는 하나의 Pod만 owner가 될 수 있다.
-* Pod 내부에서는 `active-threads`를 할당받은 shard들에 나눠 배정한다.
-* shard마다 최소 1개 thread가 있어야 한다.
-* Pod 증감 시 기존 shard owner는 가능한 유지한다. Kafka `StickyAssignor`와 같은 방향이다.
+* 중앙 Group Coordinator를 두지 않는다.
+* 모든 instance는 같은 metadata snapshot으로 assignment를 독립 계산한다.
+* assignment algorithm은 deterministic 해야 한다.
+* 하나의 shard는 하나의 runtime instance만 lease owner가 될 수 있다.
+* shard owner instance 내부에서도 하나의 shard는 하나의 worker thread만 읽는다.
+* 순서 보장은 shard 단위로만 제공한다.
 * 실제 read 권한은 shard lease로 fencing한다.
+* consumer는 `NOACK`을 사용하지 않는다.
 
 ---
 
-## 3. Stream Sharding
+## 5. Stream Metadata
 
-### 3.1 Stream Key
+producer, consumer, assignment 계산은 모두 metadata store의 stream metadata를 기준으로 한다.
+로컬 설정으로 shard count나 hash algorithm을 임의 선택하면 안 된다.
 
-기본 형식:
-
-```text
-{stream-prefix}:{version}:{shard-index}
-```
-
-예:
+저장 값:
 
 ```text
-notification:v1:0
-notification:v1:1
-notification:v1:2
+stream_metadata
+  stream_prefix
+  stream_version
+  shard_count
+  partition_key_schema
+  partition_hash_algorithm
+  partition_hash_seed
+  assignment_algorithm
+  assignment_hash_seed
+  stream_key_format
+  metadata_version
+  state          # ACTIVE, DRAINING, DEPRECATED
+  created_at
+  updated_at
 ```
 
-Redis Cluster에서는 같은 hash tag를 쓰지 않는다.
+불변 값:
 
-금지 예:
+* `shard_count`
+* `partition_key_schema`
+* `partition_hash_algorithm`
+* `partition_hash_seed`
+* `assignment_algorithm`
+* `assignment_hash_seed`
+
+위 값이 바뀌면 같은 partition key가 다른 shard 또는 다른 owner로 계산될 수 있다.
+따라서 같은 `stream_prefix + stream_version` 안에서는 바꾸지 않는다.
+변경이 필요하면 새 `stream_version`을 만든다.
+
+metadata 조회 정책:
+
+* producer/consumer는 hot path에서 metadata store를 매번 조회하지 않는다.
+* 시작 시 metadata를 로드하고 local immutable snapshot으로 캐시한다.
+* `metadata_version` 변경 event 또는 refresh interval로 새 snapshot을 가져온다.
+* message의 `streamVersion`, `metadataVersion` 기준으로 해당 버전의 metadata를 검증한다.
+* active version만 기준으로 검증하면 v1/v2 dual-read 전환 중 정상 backlog를 오탐할 수 있다.
+
+---
+
+## 6. Producer Routing
 
 ```text
-notification:{v1}:0
-notification:{v1}:1
+metadata = metadataCache.get(streamPrefix, streamVersion)
+partitionKey = partitionKeyExtractor(message, metadata.partitionKeySchema)
+shardIndex = hash(metadata.partitionHashAlgorithm, metadata.partitionHashSeed, partitionKey) % metadata.shardCount
+streamKey = format(metadata.streamKeyFormat, streamPrefix, streamVersion, shardIndex)
 ```
 
-위처럼 쓰면 모든 shard가 같은 Redis Cluster slot에 묶일 수 있다.
-
-### 3.2 Producer Routing
-
-```text
-shardIndex = stableHash(shardKey) % shardCount
-streamKey = "{streamPrefix}:{version}:{shardIndex}"
-```
-
-`stableHash`는 JVM `hashCode`에 의존하지 않는다.
-
-권장:
+권장 hash algorithm:
 
 * MurmurHash3
 * xxHash
 * CRC32C
 
-순서 보장이 필요한 단위가 있다면 그 값을 `shardKey`로 사용한다.
+message에는 routing metadata를 넣는다.
+
+```json
+{
+  "partitionKey": "user-123",
+  "streamPrefix": "notification",
+  "streamVersion": "v1",
+  "shardIndex": 2,
+  "partitionHashAlgorithm": "murmur3",
+  "partitionHashSeed": "default",
+  "metadataVersion": 4,
+  "idempotencyKey": "..."
+}
+```
+
+순서 보장이 필요한 단위가 있다면 그 값을 partition key로 사용한다.
 
 예:
 
@@ -104,19 +189,29 @@ streamKey = "{streamPrefix}:{version}:{shardIndex}"
 
 ---
 
-## 4. Consumer Group
+## 7. Producer Idempotency
 
-모든 shard stream은 같은 consumer group name을 사용한다.
+Redis 8.6 이상에서는 `XADD`의 idempotent 옵션을 사용한다.
 
-예:
-
-```text
-notification:v1:0 -> group: notification-consumer
-notification:v1:1 -> group: notification-consumer
-notification:v1:2 -> group: notification-consumer
+```redis
+XADD {streamKey} IDMP {producerName} {idempotencyKey} * field value
 ```
 
-단, Redis Stream consumer group은 stream key마다 따로 생성해야 한다.
+정책:
+
+* `IDMPAUTO`는 사용하지 않는다.
+* producer는 publish 전에 idempotency key를 생성한다.
+* 같은 business event retry는 같은 idempotency key를 재사용한다.
+* 다른 business event는 다른 idempotency key를 사용한다.
+* `producerName`은 같은 producer 논리 주체를 나타내는 안정적인 이름이다.
+* idempotency key의 보관 기간은 business replay/idempotency 요구사항과 맞춰 운영한다.
+
+---
+
+## 8. Consumer Group
+
+모든 shard stream은 같은 consumer group name을 사용한다.
+Redis Stream consumer group은 stream key마다 따로 생성한다.
 
 ```redis
 XGROUP CREATE notification:v1:0 notification-consumer $ MKSTREAM
@@ -124,92 +219,45 @@ XGROUP CREATE notification:v1:1 notification-consumer $ MKSTREAM
 XGROUP CREATE notification:v1:2 notification-consumer $ MKSTREAM
 ```
 
-기본 start id는 `$`이다. 기존 backlog까지 읽어야 하는 경우에만 `0-0`을 사용한다.
+기본 start id는 `$`이다.
+기존 backlog까지 읽어야 하는 경우에만 `0-0`을 사용한다.
 
----
-
-## 5. Consumer Name
-
-consumer name은 Pod와 thread를 추적할 수 있어야 한다.
+consumer name:
 
 ```text
-{application}:{podName}:thread-{threadIndex}
+{application}:{instanceId}:worker-{workerIndex}
 ```
 
 예:
 
 ```text
-order-api:order-api-7f9c9d9d7b-x82kd:thread-0
-order-api:order-api-7f9c9d9d7b-x82kd:thread-1
+order-api:order-api-7f9c9d9d7b-x82kd:worker-0
+order-api:host-a:12345:1714700000:worker-1
 ```
-
-thread마다 consumer name을 다르게 둔다. 그래야 `XPENDING`, `XINFO CONSUMERS`, dead consumer cleanup을 운영할 수 있다.
 
 ---
 
-## 6. Group Coordinator
+## 9. Runtime Membership
 
-### 6.1 왜 필요한가
+### 9.1 Instance Identity
 
-모든 Pod가 각자 assignment를 계산하면 순간적으로 서로 다른 결과를 볼 수 있다. Kafka처럼 rebalance를 일관되게 만들기 위해 Group Coordinator를 둔다.
+shard assignment의 기준은 `instanceId`이다.
 
-Coordinator는 별도 서버가 아니다. 살아있는 Pod 중 하나가 Redis lease를 획득해 coordinator 역할을 수행한다.
+생성 규칙:
 
-### 6.2 Coordinator Lease
+* 기본값: `{application}:{hostName}:{processId}:{startTime}`
+* 수동 지정: `redis-stream.instance.id`
+* platform이 안정적인 instance unique id를 제공하면 그 값을 사용한다.
 
-```text
-redis-stream:coordinator:{module}:{consumerGroup}
-```
+같은 consumer group 안에서 `instanceId`는 중복되면 안 된다.
+중복이 감지되면 나중에 등록한 instance를 `DEGRADED`로 두고 assignment 대상에서 제외한다.
 
-기본 설정:
+### 9.2 Registry
 
-```yaml
-coordinator:
-  ttl: 15s
-  renew-interval: 5s
-```
-
-coordinator가 죽으면 lease 갱신이 멈춘다. TTL이 지나면 다른 Pod가 coordinator lease를 획득한다.
-
-### 6.3 Coordinator 책임
-
-Coordinator만 assignment plan을 만든다.
-
-책임:
-
-* active Pod 목록 조회
-* Sticky Balanced Assignment 계산
-* assignment generation 증가
-* assignment plan 저장
-* assignment 변경 event publish
-
-assignment plan 예:
-
-```json
-{
-  "generation": 17,
-  "coordinatorEpoch": 4,
-  "assignor": "STICKY_BALANCED",
-  "assignments": {
-    "pod-a": [0, 1, 2],
-    "pod-b": [5, 6, 7],
-    "pod-c": [3, 4, 8, 9]
-  }
-}
-```
-
-Follower Pod는 assignment를 직접 확정하지 않는다. 저장된 assignment plan을 읽고 자기 shard만 처리한다.
-
----
-
-## 7. Pod Membership
-
-### 7.1 Registry
-
-각 Pod는 Redis에 heartbeat key를 등록한다.
+각 runtime instance는 metadata store 또는 Redis에 heartbeat를 등록한다.
 
 ```text
-redis-stream:registry:{module}:pods:{podUid}
+redis-stream:registry:{module}:{consumerGroup}:instances:{instanceId}
 ```
 
 값 예:
@@ -217,10 +265,12 @@ redis-stream:registry:{module}:pods:{podUid}
 ```json
 {
   "application": "order-api",
-  "podName": "order-api-7f9c9d9d7b-x82kd",
-  "podUid": "...",
-  "state": "STABLE",
-  "lastSeenAt": "2026-05-01T10:00:10Z"
+  "instanceId": "host-a:12345:1714700000",
+  "configVersion": "2026-05-03.1",
+  "assignmentConfigVersion": 3,
+  "state": "ACTIVE",
+  "lastSeenAt": "2026-05-01T10:00:10Z",
+  "metadataVersion": 4
 }
 ```
 
@@ -230,200 +280,426 @@ redis-stream:registry:{module}:pods:{podUid}
 heartbeat-ttl = heartbeat-interval * 3
 ```
 
-### 7.2 상태 변경 감지
+membership registry에 남아 있는 instance 조건:
 
-상태 변경은 두 방식으로 감지한다.
+* heartbeat TTL 안에 갱신됨
+* 같은 `streamPrefix`, `streamVersion`, `consumerGroup`을 사용
+* metadata version이 호환됨
 
-* Redis Pub/Sub event: 빠른 감지용
-* Redis registry scan: fallback 및 source of truth
+assignment candidate 조건:
 
-Pub/Sub은 유실될 수 있으므로 event만 보고 assignment를 바꾸지 않는다. event를 받으면 registry snapshot을 다시 읽는다.
+* state가 `ACTIVE`
+* heartbeat TTL 안에 갱신됨
+* 같은 `streamPrefix`, `streamVersion`, `consumerGroup`을 사용
+* metadata version이 호환됨
+* assignment config version이 호환됨
 
-기본 감지 지연:
+`DRAINING` instance는 registry에는 남아 있지만 새 owner 계산에서는 제외한다.
+그래야 scale-in 때 다른 instance가 해당 shard의 새 owner로 계산될 수 있다.
 
-```text
-fast path    ~= pubsub latency + registry refresh latency
-fallback path <= rebalance-interval + scan duration
-```
+### 9.3 Rolling Deploy와 Config Compatibility
+
+rolling deploy 중에는 서로 다른 yaml 설정으로 뜬 instance가 공존할 수 있다.
+예를 들어 새 instance는 scale-out 설정을 포함하고 있지만, 기존 instance는 아직 이전 설정으로 동작할 수 있다.
+이 구간을 고려하지 않으면 같은 shard에 대해 서로 다른 owner 계산이 발생한다.
+
+설정은 두 종류로 나눈다.
+
+assignment-affecting config:
+
+* `stream-version`
+* `assignment.strategy`
+* `assignment.hash-seed`
+* `membership.heartbeat-ttl`
+* `shard-lease.ttl`
+* `shard-lease.renew-interval`
+* shard ownership 계산에 영향을 주는 모든 값
+
+local-only config:
+
+* `consumer.active-threads`
+* `consumer.batch-size`
+* `consumer.block-timeout`
+* metric/export 설정
+
+정책:
+
+* assignment-affecting config는 yaml만으로 각 instance가 임의 적용하면 안 된다.
+* metadata store에 `assignment_config_version`과 canonical assignment config를 저장한다.
+* instance는 시작 시 local yaml과 metadata store의 assignment config를 비교한다.
+* 다르면 `DEGRADED`로 등록하고 assignment candidate에서 제외한다.
+* rolling deploy 중에는 구버전/신버전 instance가 공존할 수 있지만, assignment candidate는 같은 `assignment_config_version`을 가진 instance만 포함한다.
+* 최종적으로 모든 instance가 같은 config version으로 수렴한 뒤 새 version을 active로 올린다.
+
+local-only config는 instance마다 달라도 shard owner 계산에 영향을 주지 않는다.
+예를 들어 `active-threads`가 instance마다 달라도 자신이 소유한 shard를 내부 worker에 어떻게 나눌지만 달라질 뿐, shard owner 자체는 바뀌면 안 된다.
 
 ---
 
-## 8. Pod State
+## 10. Coordinatorless Assignment
 
-Kafka consumer group 상태를 참고해 단순한 Pod state를 사용한다.
+### 10.1 왜 Coordinator를 제거하는가
+
+중앙 coordinator 방식은 assignment를 한 곳에서 결정한다는 장점이 있지만, 다음 비용이 생긴다.
+
+* leader election 구현
+* coordinator lease 갱신
+* assignment plan 저장과 전파
+* stale leader fencing
+* partial rebalance 복구
+* follower 적용 상태 추적
+
+이 모듈의 목표는 Redis Stream을 운영 가능한 수준으로 확장하는 것이지, Kafka coordinator를 재구현하는 것이 아니다.
+따라서 assignment는 stateless deterministic algorithm으로 계산한다.
+
+### 10.2 Synchronized Consumer View
+
+중앙 coordinator는 없지만 consumer들이 서로 다른 세계를 보고 있으면 안 된다.
+따라서 모든 consumer는 같은 기준으로 만든 synchronized view를 사용한다.
+
+synchronized view는 다음 값의 조합이다.
 
 ```text
-STARTING
-JOINING
-PREPARING_REBALANCE
-COMPLETING_REBALANCE
-STABLE
-DRAINING
-DEGRADED
-STOPPED
+consumerView =
+  streamPrefix
+  streamVersion
+  metadataVersion
+  assignmentConfigVersion
+  membershipEpoch
+  assignmentAlgorithm
+  assignmentHashSeed
+  activeInstanceIds(sorted)
 ```
 
-의미:
+생성 규칙:
 
-* `STARTING`: registry 등록 전
-* `JOINING`: registry 등록 후 첫 assignment 대기
-* `PREPARING_REBALANCE`: 기존 shard 반납 준비
-* `COMPLETING_REBALANCE`: 새 assignment 적용 중
-* `STABLE`: 정상 consume 중
-* `DRAINING`: 종료 또는 shard 반납 중
-* `DEGRADED`: 설정 부족 등으로 새 shard를 맡을 수 없음
-* `STOPPED`: 종료 또는 TTL 만료
+* registry snapshot을 읽는다.
+* assignment candidate 조건을 만족하는 instance만 고른다.
+* `instanceId`를 정렬해 canonical member list를 만든다.
+* member list의 hash를 계산한다.
+* `membershipEpoch = hash(metadataVersion, assignmentConfigVersion, assignmentAlgorithm, assignmentHashSeed, sortedInstanceIds)`로 만든다.
 
-assignment owner 후보:
+`membershipEpoch`에는 local clock이나 snapshot 조회 시각을 넣지 않는다.
+같은 member list를 본 consumer들이 서로 다른 epoch을 만들면 불필요한 lease churn이 발생한다.
 
-* 포함: `JOINING`, `STABLE`, `PREPARING_REBALANCE`, `COMPLETING_REBALANCE`
-* 제외: `STARTING`, `DRAINING`, `DEGRADED`, `STOPPED`
+모든 instance는 자기 local view가 바뀔 때만 shard owner를 다시 계산한다.
+view가 같으면 assignment 결과도 같아야 한다.
+
+동기화 정책:
+
+* consumer는 `metadataVersion`과 `membershipEpoch`을 shard lease value에 기록한다.
+* lease renew 시 현재 local view와 lease의 view가 다르면 renew하지 않는다.
+* 새 view에서 자신이 owner가 아닌 shard는 신규 read를 중단한다.
+* 새 view에서 자신이 owner인 shard는 lease 획득 후 pending recovery를 먼저 수행한다.
+* view 전환 중 중복 read는 lease CAS로 막고, 일시 미할당은 허용한다.
+
+이 방식은 coordinator가 assignment를 push하지 않고도 consumer들이 같은 계산 기준으로 움직이게 만든다.
+
+### 10.3 Assignment Algorithm
+
+기본 algorithm은 Rendezvous Hashing(HRW)이다.
+
+```text
+owner(shardIndex) =
+  argmax(instance in activeInstances) {
+    hash(assignmentHashSeed, streamPrefix, streamVersion, shardIndex, instanceId)
+  }
+```
+
+특성:
+
+* 모든 instance가 같은 active member snapshot을 보면 같은 owner를 계산한다.
+* instance가 추가되면 일부 shard만 새 instance로 이동한다.
+* instance가 제거되면 제거된 instance의 shard만 남은 instance로 이동한다.
+* 별도 assignment plan 저장이 필요 없다.
+* shard count와 instance count가 달라도 자연스럽게 분배된다.
+
+대규모 shard에서 균등성이 부족하면 bounded-load rendezvous hashing을 후속 옵션으로 둔다.
+MVP는 plain Rendezvous Hashing을 사용한다.
+
+### 10.4 Snapshot Consistency
+
+모든 instance가 항상 완전히 같은 시점의 member snapshot을 볼 수는 없다.
+그래서 assignment 계산 결과만으로 read 권한을 주지 않는다.
+
+정책:
+
+* instance는 자신이 owner라고 계산한 shard에 대해서만 shard lease 획득을 시도한다.
+* shard lease를 얻은 instance만 `XREADGROUP`을 수행한다.
+* member snapshot이 잠시 달라도 lease CAS가 최종 fencing 역할을 한다.
+* snapshot 불일치 동안에는 중복 read 대신 일부 shard가 잠시 미할당될 수 있다.
+* 미할당 시간은 heartbeat TTL, lease TTL, scan interval로 제한한다.
 
 ---
 
-## 9. Sticky Balanced Assignment
+## 11. Scale In / Scale Out
 
-### 9.1 목표
+### 11.1 Rebalance Trigger
 
-Kafka `StickyAssignor`처럼 기존 shard owner를 최대한 유지한다.
+rebalance는 별도 coordinator가 명령하지 않는다.
+각 instance가 synchronized consumer view 변화를 감지하면 shard owner를 다시 계산한다.
 
-목표:
+trigger:
 
-1. 모든 shard는 정확히 하나의 Pod에만 배정된다.
-2. Pod별 shard 수는 최대한 균등해야 한다.
-3. 기존 owner가 살아 있으면 가능한 그대로 유지한다.
-4. Pod 증감 시 이동하는 shard 수를 최소화한다.
+* 새 instance heartbeat 등록
+* 기존 instance heartbeat TTL 만료
+* instance state가 `ACTIVE`에서 `DRAINING`으로 변경
+* stream metadata version 변경
+* assignment algorithm/seed 변경. 단, 같은 stream version 안에서는 변경 금지
 
-### 9.2 균등 기준
+view가 바뀌면 각 instance는 다음 세트를 계산한다.
 
 ```text
-base = shardCount / podCount
-remainder = shardCount % podCount
+currentOwnedShards = lease를 보유하고 read 중인 shard
+nextOwnedShards = newView 기준 owner(instanceId) == self 인 shard
+
+shardsToKeep = currentOwnedShards ∩ nextOwnedShards
+shardsToReturn = currentOwnedShards - nextOwnedShards
+shardsToAcquire = nextOwnedShards - currentOwnedShards
 ```
 
-각 Pod는 `base` 또는 `base + 1`개의 shard를 가진다.
+처리 순서:
+
+1. `shardsToReturn` 신규 read 중단
+2. `shardsToKeep` lease renew 지속
+3. `shardsToAcquire` lease 획득 시도
+4. 반환 완료 또는 lease 만료 후 새 owner가 pending recovery
+5. 새 owner가 신규 read 시작
+
+### 11.2 Shard Return Protocol
+
+shard 반환은 graceful return과 forced return으로 나눈다.
+
+graceful return:
+
+1. worker가 해당 shard를 `RETURNING` 상태로 바꾼다.
+2. 해당 shard에 대한 새 `XREADGROUP >` 호출을 중단한다.
+3. 이미 읽어 handler 실행 중인 message는 timeout 안에서 완료한다.
+4. 성공한 message는 processing metadata를 `PROCESSED`로 기록한 뒤 `XACK`한다.
+5. 실패한 message는 retry/DLQ 정책을 따른다.
+6. in-flight message가 0이 되면 shard lease renew를 중단한다.
+7. 가능하면 lease value에 `state=RELEASING`을 기록하고 TTL을 짧게 줄인다.
+8. 새 owner는 release marker를 보고 짧아진 TTL 만료를 기다린 뒤 lease 획득을 시도한다.
+
+forced return:
+
+* process crash, SIGKILL, node failure에서는 graceful return이 불가능하다.
+* heartbeat TTL과 shard lease TTL이 만료될 때까지 기존 owner로 간주될 수 있다.
+* 새 owner는 lease 획득 후 PEL recovery를 먼저 수행한다.
+* 이 경로에서는 at-least-once 재전달이 발생할 수 있으므로 idempotency가 필수이다.
+
+반환 중 금지:
+
+* in-flight handler가 남아 있는데 lease를 즉시 삭제하지 않는다.
+* 반환 중인 shard에서 신규 message를 읽지 않는다.
+* owner가 아닌 shard의 pending message를 reclaim하지 않는다.
+* release marker만 보고 side effect fencing을 생략하지 않는다.
+
+### 11.3 Shard Acquire Protocol
+
+새 owner는 자신이 owner라고 계산한 shard에 대해 lease 획득을 시도한다.
+
+절차:
+
+1. 현재 synchronized view에서 자신이 owner인지 확인한다.
+2. 기존 lease가 있으면 TTL 만료 또는 release marker를 기다린다.
+3. `SET NX PX`로 shard lease 획득을 시도한다.
+4. lease 획득 시 `leaseToken`, `metadataVersion`, `membershipEpoch`을 기록한다.
+5. pending recovery를 먼저 수행한다.
+6. recovery가 끝나면 `XREADGROUP ... >`로 신규 message read를 시작한다.
+7. read loop 중 lease renew 실패 또는 view mismatch가 발생하면 즉시 read를 중단한다.
+
+acquire backoff:
+
+* lease 획득 실패 시 짧은 jitter backoff 후 재시도한다.
+* 모든 instance가 동시에 같은 shard에 대해 spin하지 않도록 shard별 backoff를 둔다.
+* backoff는 `renew-interval`보다 짧고 `lease-ttl`보다 충분히 작아야 한다.
+
+handoff timeout:
+
+* graceful return이 `handoff-timeout` 안에 끝나지 않으면 기존 owner는 신규 read 중단 상태를 유지하고 lease renew를 중단한다.
+* 새 owner는 lease TTL 만료 후 forced acquire 경로로 들어간다.
+* timeout 이후 남은 in-flight message는 Redis PEL recovery와 idempotency로 처리한다.
+
+### 11.4 Scale Out
+
+새 instance가 시작되면 registry에 heartbeat를 등록한다.
+다른 instance들은 registry refresh 후 active member set에 새 instance를 포함한다.
+Rendezvous Hashing 결과가 바뀐 shard만 이동 대상이 된다.
+
+절차:
+
+1. 새 instance가 `ACTIVE`로 등록된다.
+2. 모든 instance가 다음 refresh에서 새 member set을 본다.
+3. 기존 owner는 `shardsToReturn`을 계산한다.
+4. 기존 owner는 반환 대상 shard의 신규 read를 중단한다.
+5. 기존 owner는 in-flight message를 완료한 뒤 lease renew를 중단한다.
+6. 새 owner는 `shardsToAcquire`에 대해 lease 획득을 시도한다.
+7. 새 owner는 lease 획득 후 pending recovery를 먼저 수행한다.
+8. 새 owner는 신규 message read를 시작한다.
+
+### 11.5 Scale In
+
+instance가 정상 종료되면 먼저 `DRAINING` 상태로 바꾼다.
+
+절차:
+
+1. 종료 대상 instance가 registry state를 `DRAINING`으로 바꾼다.
+2. `DRAINING` instance는 assignment candidate에서 제외된다.
+3. 남은 instance들은 새 view로 owner를 다시 계산한다.
+4. 종료 대상 instance는 모든 owned shard를 graceful return한다.
+5. 남은 instance들은 반환된 shard lease를 획득한다.
+6. 새 owner는 pending recovery 후 신규 read를 시작한다.
+7. 종료 대상 instance는 모든 shard 반환 후 heartbeat를 삭제하거나 TTL 만료를 기다린다.
+
+강제 종료:
+
+* heartbeat TTL이 만료되면 active member set에서 빠진다.
+* 다른 instance가 제거된 instance의 shard를 owner로 계산한다.
+* shard lease TTL 만료 후 새 owner가 lease를 획득한다.
+* pending recovery 후 신규 read를 시작한다.
+
+### 11.6 이동량
+
+Rendezvous Hashing은 instance 증감 시 전체 shard를 재분배하지 않는다.
+추가/제거된 instance와 관련된 shard만 주로 이동한다.
 
 예:
 
 ```text
-10 shards / 3 pods = 3 / 3 / 4
+10 shards / 2 instances
+instance-a -> 0, 2, 3, 5, 8
+instance-b -> 1, 4, 6, 7, 9
+
+instance-c 추가 후
+instance-a -> 0, 3, 8
+instance-b -> 1, 4, 7
+instance-c -> 2, 5, 6, 9
 ```
 
-### 9.3 Scale-out 예
+정확한 분배는 hash 결과에 따라 달라진다.
+문서나 테스트에서는 특정 예시 값보다 invariant를 검증한다.
 
-기존:
+검증해야 할 invariant:
 
-```text
-pod-0 -> 0, 1, 2, 3, 4
-pod-1 -> 5, 6, 7, 8, 9
-```
-
-`pod-2` 추가 후:
-
-```text
-pod-0 -> 0, 1, 2
-pod-1 -> 5, 6, 7
-pod-2 -> 3, 4, 8, 9
-```
-
-range를 완전히 다시 나누지 않고, 기존 Pod의 shard를 최대한 유지한다.
-
-### 9.4 Scale-in 예
-
-기존:
-
-```text
-pod-0 -> 0, 1, 2
-pod-1 -> 3, 4, 5
-pod-2 -> 6, 7, 8, 9
-```
-
-`pod-2` 제거 후:
-
-```text
-pod-0 -> 0, 1, 2, 6, 7
-pod-1 -> 3, 4, 5, 8, 9
-```
-
-남아 있는 Pod의 기존 shard는 유지하고, 사라진 Pod의 shard만 나눠 가진다.
+* 하나의 shard는 최대 하나의 lease owner만 가진다.
+* active instance가 하나 이상이면 모든 shard는 결국 owner를 가진다.
+* instance 추가 시 기존 instance 간 shard 이동은 최소화된다.
+* instance 제거 시 제거된 instance의 shard만 재할당된다.
 
 ---
 
-## 10. Shard Lease
+## 12. Shard Lease
 
-Coordinator가 assignment plan을 만들더라도 실제 read 권한은 shard lease로 확인한다.
+Shard lease는 실제 read 권한이다.
 
 ```text
-redis-stream:lease:{module}:{streamPrefix}:{version}:{shardIndex}
+redis-stream:lease:{module}:{consumerGroup}:{streamPrefix}:{version}:{shardIndex}
+```
+
+lease value:
+
+```json
+{
+  "instanceId": "host-a:12345:1714700000",
+  "workerId": "worker-0",
+  "leaseToken": 42,
+  "metadataVersion": 4,
+  "assignmentConfigVersion": 3,
+  "membershipEpoch": "6d3a...",
+  "state": "OWNED",
+  "expiresAt": "2026-05-01T10:00:20Z"
+}
 ```
 
 정책:
 
-* assignment plan상 owner인 Pod만 shard lease를 획득한다.
-* lease를 가진 Pod의 worker만 `XREADGROUP`을 수행한다.
-* lease 갱신에 실패하면 해당 shard read를 중단하고 `DRAINING`한다.
-* lease는 중복 read 시간을 줄이기 위한 fencing 장치이다. exactly-once를 보장하지 않는다.
+* `SET key value NX PX ttl`로 최초 획득한다.
+* renew는 owner와 token이 일치할 때만 Lua로 갱신한다.
+* owner가 아니면 갱신하지 않는다.
+* renew 시 `metadataVersion`, `assignmentConfigVersion`, `membershipEpoch`이 현재 local view와 같아야 한다.
+* lease 갱신 실패 시 해당 shard의 신규 read를 즉시 중단한다.
+* graceful return 중에는 lease state를 `RELEASING`으로 바꿀 수 있다.
+* `RELEASING`은 새 owner에게 lease TTL 만료가 가까워졌다는 신호를 주기 위한 hint이다.
+* lease token과 TTL이 최종 권한 기준이며, release marker만으로 소유권을 넘기지 않는다.
+* handler side effect 전후로 가능하면 lease token을 processing metadata에 기록한다.
+* lease는 중복 read 시간을 줄이는 fencing 장치이다.
+* 최종 중복 side effect 방지는 idempotency와 processing state가 담당한다.
+
+TTL 권장:
+
+```text
+lease-ttl >= max(handler-timeout, block-timeout) + renew-jitter-buffer
+renew-interval <= lease-ttl / 3
+```
 
 ---
 
-## 11. Pod 내부 Thread 분배
+## 13. Worker Thread Model
 
-설정:
-
-```yaml
-consumer:
-  active-threads: 4
-```
-
-`active-threads`는 Pod 하나가 Redis Stream consume에 사용할 전체 thread 수이다.
+`active-threads`는 instance 하나가 Redis Stream consume에 사용할 최대 worker 수이다.
 
 규칙:
 
-* Pod가 shard를 하나도 받지 않으면 thread를 만들지 않는다.
-* Pod가 shard를 받으면 shard마다 최소 1개 thread를 배정한다.
-* 따라서 `active-threads >= assignedShardCount`여야 한다.
-* 남는 thread는 shard에 균등하게 추가 배정한다.
+* instance가 shard를 하나도 받지 않으면 worker를 만들지 않는다.
+* instance가 shard를 받으면 최대 `active-threads`개 worker를 만든다.
+* 하나의 shard는 정확히 하나의 worker에만 배정한다.
+* 한 worker는 여러 shard를 순차적으로 읽을 수 있다.
+* `active-threads > assignedShardCount`이면 남는 worker는 만들지 않는다.
+* shard 하나에 worker를 2개 이상 붙이지 않는다.
 
 예:
 
 ```text
 assigned shards = 6, 7, 8, 9
-active-threads = 6
+active-threads = 2
 
-shard 6 -> thread-0
-shard 7 -> thread-1
-shard 8 -> thread-2, thread-3
-shard 9 -> thread-4, thread-5
+shard 6 -> worker-0
+shard 7 -> worker-0
+shard 8 -> worker-1
+shard 9 -> worker-1
 ```
 
-주의:
+순서 보장:
 
-* 한 shard에 thread가 2개 이상이면 shard 내부 처리 순서는 보장되지 않는다.
-* shard 내부 strict ordering이 필요하면 `active-threads == assignedShardCount`가 되도록 운영해야 한다.
+* 같은 shard의 message는 같은 worker에서 순차 처리한다.
+* shard 간 순서는 보장하지 않는다.
+* 한 shard의 handler를 병렬 실행하지 않는다.
+
+운영 주의:
+
+* worker 하나가 여러 shard를 맡으면 한 shard의 느린 처리가 같은 worker의 다른 shard에도 영향을 줄 수 있다.
+* 순서 보장을 유지하면서 격리성을 높이려면 `active-threads >= assignedShardCount`가 되도록 운영한다.
 
 ---
 
-## 12. Pending Recovery / Retry / DLQ
+## 14. Pending Recovery / Retry / DLQ
 
-Redis Stream은 at-least-once이다. consumer가 죽으면 message는 PEL에 남는다.
+Redis Stream은 consumer가 죽으면 message를 PEL에 남긴다.
+새 shard owner는 신규 read 전에 pending recovery를 먼저 수행한다.
+
+순서 보장 정책:
+
+* pending recovery도 shard owner의 단일 worker만 수행한다.
+* recovery 중에는 해당 shard의 신규 message read를 멈춘다.
+* pending message를 먼저 처리하고 ACK한 뒤 신규 message read를 재개한다.
+* 처리 실패 message를 건너뛰고 뒤 message를 먼저 ACK하면 shard 내부 순서 보장이 깨질 수 있다.
+* max attempts 초과로 DLQ 이동 후 ACK하는 것은 순서 보장을 포기하고 운영 보상 처리로 넘기는 명시적 정책이다.
 
 Recovery:
 
 ```redis
-XAUTOCLAIM {streamKey} {groupName} {consumerName} {minIdleTime} 0-0 COUNT {count}
+XAUTOCLAIM {streamKey} {groupName} {consumerName} {minIdleTime} {startId} COUNT {count}
 ```
 
 정책:
 
-* shard owner Pod의 worker만 해당 shard의 pending message를 reclaim한다.
+* `XAUTOCLAIM`은 반환된 next start id로 반복 호출한다.
+* next start id가 `0-0`이 될 때까지 한 recovery pass를 계속한다.
+* shard owner worker만 해당 shard의 pending message를 reclaim한다.
 * retry count가 `max-attempts`를 넘으면 DLQ로 이동한다.
 * DLQ 이동 후 원본 message는 ACK한다.
-
-DLQ key:
-
-```text
-{streamKey}:dlq
-```
+* 이미 metadata store에 `PROCESSED`로 기록된 message는 handler를 다시 실행하지 않고 ACK한다.
 
 Dead consumer cleanup:
 
@@ -433,45 +709,66 @@ Dead consumer cleanup:
 
 ---
 
-## 13. Coordinator 장애 처리
+## 15. Metadata Store
 
-Coordinator가 갑자기 죽어도 기존 shard owner는 즉시 멈추지 않는다.
+운영 기본값은 RDBMS(PostgreSQL/MySQL)이다.
+Redis Hash/JSON은 로컬 또는 경량 환경에서만 선택한다.
 
-흐름:
+관리할 metadata:
 
-1. coordinator Pod가 죽는다.
-2. coordinator lease renew가 멈춘다.
-3. 기존 shard owner들은 shard lease가 살아 있는 동안 계속 consume한다.
-4. coordinator TTL이 지나면 다른 Pod가 coordinator가 된다.
-5. 새 coordinator가 이전 assignment plan을 읽는다.
-6. Sticky Balanced Assignment로 새 generation을 만든다.
-7. follower Pod들이 새 assignment plan을 적용한다.
+* stream metadata
+* runtime instance registry
+* shard lease mirror 또는 audit
+* message processing state
+* idempotency key
+* retry count
+* DLQ 기록
 
-stale plan 방지:
+핵심 테이블 예:
 
-* assignment plan에는 `coordinatorEpoch`과 `generation`을 포함한다.
-* Pod는 더 낮은 epoch/generation의 plan을 무시한다.
-* coordinator lease owner가 아닌 Pod는 assignment plan을 덮어쓰지 않는다.
+```text
+stream_runtime_instance
+  consumer_group
+  instance_id
+  application
+  host
+  process_id
+  state
+  metadata_version
+  assignment_config_version
+  config_version
+  last_seen_at
+
+stream_message_processing
+  group_name
+  stream_key
+  message_id
+  idempotency_key
+  state          # CLAIMED, PROCESSED, FAILED, DLQ
+  owner_instance_id
+  lease_token
+  attempt_count
+  updated_at
+```
+
+필수 제약:
+
+* `stream_metadata(stream_prefix, stream_version, metadata_version)` unique
+* `stream_runtime_instance(consumer_group, instance_id)` unique
+* `stream_message_processing(idempotency_key)` unique
+* 또는 `stream_message_processing(group_name, stream_key, message_id)` unique
+
+retention:
+
+* `PROCESSED` metadata는 idempotency/replay 보장 기간만큼 보관한다.
+* DLQ metadata는 운영 분석 기간만큼 보관한다.
+* retention window 없이 무한 보관하지 않는다.
 
 ---
 
-## 14. Shard Count 변경
+## 16. Version Migration
 
-`shard-count`는 같은 prefix 안에서 바꾸면 안 된다.
-
-예:
-
-```text
-hash(user-123) % 6  = 2
-hash(user-123) % 12 = 8
-```
-
-같은 partition key가 다른 shard로 바뀌므로 기존 stream을 찾을 수 없게 된다.
-
-정책:
-
-* `shard-count`는 stream prefix version에 묶인 불변값이다.
-* shard 수를 바꾸려면 새 prefix version을 만든다.
+`shard_count`, partition hash algorithm, assignment algorithm을 바꾸려면 새 stream version을 만든다.
 
 예:
 
@@ -482,56 +779,74 @@ notification:v2:0 ~ notification:v2:11
 
 전환 절차:
 
-1. v2 stream과 group 생성
-2. producer dual-write 또는 v2 write 전환
-3. consumer가 v1/v2를 함께 읽을 수 있게 배포
-4. v1 backlog drain
-5. v2만 사용
-6. v1 제거
+1. v2 stream metadata를 생성한다.
+2. v2 stream과 consumer group을 생성한다.
+3. producer dual-write 또는 v2 write 전환을 배포한다.
+4. consumer가 v1/v2를 함께 읽도록 배포한다.
+5. v1 backlog를 drain한다.
+6. v2만 사용한다.
+7. rollback window 이후 v1을 deprecated 처리한다.
 
-message에는 routing metadata를 넣는다.
-
-```json
-{
-  "partitionKey": "user-123",
-  "streamPrefix": "notification:v1",
-  "shardIndex": 2,
-  "hashAlgorithm": "murmur3",
-  "idempotencyKey": "..."
-}
-```
+consumer는 message의 `streamVersion`과 `metadataVersion`으로 해당 metadata snapshot을 조회한다.
+active stream version만 기준으로 검증하지 않는다.
 
 ---
 
-## 15. 기본 설정
+## 17. Configuration
 
 ```yaml
 redis-stream:
   enabled: true
   stream-prefix: notification
   stream-version: v1
-  shard-count: 12
   consumer-group: notification-consumer
 
-  group:
-    start-id: "$"
+  stream-metadata:
+    source: METADATA_STORE
+    refresh-interval: 30s
+    fail-on-mismatch: true
+
+  config:
+    version: "2026-05-03.1"
+    assignment-config-source: METADATA_STORE
+    fail-on-assignment-config-mismatch: true
+
+  membership:
+    heartbeat-interval: 5s
+    heartbeat-ttl: 15s
+    refresh-interval: 5s
+
+  assignment:
+    strategy: RENDEZVOUS_HASH
+    hash-seed: default
+
+  instance:
+    id: null
+    identity-source: AUTO
 
   consumer:
     active-threads: 4
     batch-size: 50
     block-timeout: 2s
+    ack-mode: ACK_AFTER_SUCCESS
+    ordering: SHARD
 
-  coordinator:
-    ttl: 15s
-    renew-interval: 5s
+  producer:
+    idempotency:
+      enabled: true
+      mode: IDMP
+      producer-name: "${spring.application.name}"
 
-  assignment:
-    strategy: STICKY_BALANCED
-    rebalance-interval: 5s
+  metadata-store:
+    type: RDBMS
+    transaction-required: true
+    claim-timeout: 120s
+    processed-retention: 7d
 
   shard-lease:
     ttl: 20s
     renew-interval: 5s
+    handoff-timeout: 30s
 
   pending:
     reclaim-enabled: true
@@ -549,16 +864,22 @@ redis-stream:
 
 ---
 
-## 16. 필수 Metrics
+## 18. Metrics
 
 최소 metric:
 
-* `redis_stream_assigned_shards_per_pod`
-* `redis_stream_active_threads_running`
-* `redis_stream_pod_state`
-* `redis_stream_coordinator_active`
-* `redis_stream_assignment_generation`
-* `redis_stream_shard_lease_lost_total`
+* `redis_stream_active_instances`
+* `redis_stream_owned_shards`
+* `redis_stream_membership_epoch`
+* `redis_stream_assignment_config_version`
+* `redis_stream_config_mismatch_total`
+* `redis_stream_lease_acquired_total`
+* `redis_stream_lease_lost_total`
+* `redis_stream_lease_renew_failed_total`
+* `redis_stream_shard_returning`
+* `redis_stream_shard_acquire_retry_total`
+* `redis_stream_shard_handoff_duration`
+* `redis_stream_assignment_snapshot_version`
 * `redis_stream_messages_read_total`
 * `redis_stream_messages_ack_total`
 * `redis_stream_messages_failed_total`
@@ -566,29 +887,78 @@ redis-stream:
 * `redis_stream_pending_count`
 * `redis_stream_lag`
 * `redis_stream_reclaim_total`
+* `redis_stream_processed_duplicate_total`
+* `redis_stream_processing_claim_failed_total`
+* `redis_stream_metadata_refresh_failed_total`
 
 ---
 
-## 17. MVP 범위
+## 19. Tradeoffs
+
+### Coordinator 기반 설계
+
+장점:
+
+* assignment 결과가 명시적으로 저장된다.
+* 운영자가 현재 plan을 읽기 쉽다.
+
+단점:
+
+* leader election과 stale leader fencing이 필요하다.
+* coordinator 장애 처리가 추가된다.
+* assignment plan apply protocol이 복잡하다.
+* scale-in/out 테스트 범위가 커진다.
+* Kafka coordinator를 애플리케이션 레벨에서 다시 구현하게 된다.
+
+### Coordinatorless 설계
+
+장점:
+
+* 중앙 leader가 없다.
+* assignment plan 저장이 필요 없다.
+* scale-in/out은 active member set 변화와 deterministic hashing으로 처리한다.
+* 이동량이 제한적이다.
+* 운영과 테스트 표면이 작다.
+
+단점:
+
+* member snapshot이 일시적으로 다르면 일부 shard가 잠시 미할당될 수 있다.
+* 현재 owner를 보려면 각 instance의 계산 결과 또는 lease 상태를 봐야 한다.
+* 완벽한 균등 분배는 보장하지 않는다.
+
+결론:
+
+MVP와 production baseline은 Coordinatorless 설계를 선택한다.
+균등 분배 문제가 실제로 관측되면 bounded-load rendezvous hashing을 추가한다.
+중앙 Coordinator는 마지막 선택지로 둔다.
+
+---
+
+## 20. MVP Scope
 
 포함:
 
-* stream shard routing
+* stream metadata 관리
+* producer shard routing
+* XADD IDMP producer idempotency
 * consumer group initialization
-* Redis lease 기반 Group Coordinator
-* Sticky Balanced Assignment
+* runtime instance registry
+* Rendezvous Hashing 기반 coordinatorless shard assignment
 * shard lease fencing
-* `active-threads` 기반 Pod 내부 thread 분배
-* XREADGROUP / XACK
+* shard 단위 순서 보장
+* XREADGROUP + ACK_AFTER_SUCCESS
 * XAUTOCLAIM pending recovery
 * DLQ
 * dead consumer cleanup
+* RDBMS 기반 processing metadata
 * Micrometer metric
 
 제외:
 
-* exactly-once
+* 중앙 Group Coordinator
+* leader election
 * global ordering
 * 동적 shard-count 변경
 * Redis Cluster resharding 자동 대응
 * hot shard 자동 split
+* bounded-load rendezvous hashing
