@@ -296,7 +296,49 @@ assignment candidate 조건:
 이 모듈의 목표는 Redis Stream을 운영 가능한 수준으로 확장하는 것이지, Kafka coordinator를 재구현하는 것이 아니다.
 따라서 assignment는 stateless deterministic algorithm으로 계산한다.
 
-### 10.2 Assignment Algorithm
+### 10.2 Synchronized Consumer View
+
+중앙 coordinator는 없지만 consumer들이 서로 다른 세계를 보고 있으면 안 된다.
+따라서 모든 consumer는 같은 기준으로 만든 synchronized view를 사용한다.
+
+synchronized view는 다음 값의 조합이다.
+
+```text
+consumerView =
+  streamPrefix
+  streamVersion
+  metadataVersion
+  membershipEpoch
+  assignmentAlgorithm
+  assignmentHashSeed
+  activeInstanceIds(sorted)
+```
+
+생성 규칙:
+
+* registry snapshot을 읽는다.
+* assignment candidate 조건을 만족하는 instance만 고른다.
+* `instanceId`를 정렬해 canonical member list를 만든다.
+* member list의 hash를 계산한다.
+* `membershipEpoch = hash(metadataVersion, assignmentAlgorithm, assignmentHashSeed, sortedInstanceIds)`로 만든다.
+
+`membershipEpoch`에는 local clock이나 snapshot 조회 시각을 넣지 않는다.
+같은 member list를 본 consumer들이 서로 다른 epoch을 만들면 불필요한 lease churn이 발생한다.
+
+모든 instance는 자기 local view가 바뀔 때만 shard owner를 다시 계산한다.
+view가 같으면 assignment 결과도 같아야 한다.
+
+동기화 정책:
+
+* consumer는 `metadataVersion`과 `membershipEpoch`을 shard lease value에 기록한다.
+* lease renew 시 현재 local view와 lease의 view가 다르면 renew하지 않는다.
+* 새 view에서 자신이 owner가 아닌 shard는 신규 read를 중단한다.
+* 새 view에서 자신이 owner인 shard는 lease 획득 후 pending recovery를 먼저 수행한다.
+* view 전환 중 중복 read는 lease CAS로 막고, 일시 미할당은 허용한다.
+
+이 방식은 coordinator가 assignment를 push하지 않고도 consumer들이 같은 계산 기준으로 움직이게 만든다.
+
+### 10.3 Assignment Algorithm
 
 기본 algorithm은 Rendezvous Hashing(HRW)이다.
 
@@ -318,7 +360,7 @@ owner(shardIndex) =
 대규모 shard에서 균등성이 부족하면 bounded-load rendezvous hashing을 후속 옵션으로 둔다.
 MVP는 plain Rendezvous Hashing을 사용한다.
 
-### 10.3 Snapshot Consistency
+### 10.4 Snapshot Consistency
 
 모든 instance가 항상 완전히 같은 시점의 member snapshot을 볼 수는 없다.
 그래서 assignment 계산 결과만으로 read 권한을 주지 않는다.
@@ -416,6 +458,7 @@ lease value:
   "workerId": "worker-0",
   "leaseToken": 42,
   "metadataVersion": 4,
+  "membershipEpoch": "6d3a...",
   "expiresAt": "2026-05-01T10:00:20Z"
 }
 ```
@@ -425,6 +468,7 @@ lease value:
 * `SET key value NX PX ttl`로 최초 획득한다.
 * renew는 owner와 token이 일치할 때만 Lua로 갱신한다.
 * owner가 아니면 갱신하지 않는다.
+* renew 시 `metadataVersion`과 `membershipEpoch`이 현재 local view와 같아야 한다.
 * lease 갱신 실패 시 해당 shard의 신규 read를 즉시 중단한다.
 * handler side effect 전후로 가능하면 lease token을 processing metadata에 기록한다.
 * lease는 중복 read 시간을 줄이는 fencing 장치이다.
@@ -669,6 +713,7 @@ redis-stream:
 
 * `redis_stream_active_instances`
 * `redis_stream_owned_shards`
+* `redis_stream_membership_epoch`
 * `redis_stream_lease_acquired_total`
 * `redis_stream_lease_lost_total`
 * `redis_stream_lease_renew_failed_total`
