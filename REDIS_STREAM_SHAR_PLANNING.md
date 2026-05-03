@@ -117,17 +117,39 @@ notification:{v1}:1
 ### 3.2 Producer Routing
 
 ```text
-shardIndex = stableHash(shardKey) % shardCount
+streamMetadata = metadataStore.getStreamMetadata(streamPrefix, streamVersion)
+shardIndex = streamMetadata.partitionHashAlgorithm.hash(shardKey) % streamMetadata.shardCount
 streamKey = "{streamPrefix}:{version}:{shardIndex}"
 ```
 
-`stableHash`는 JVM `hashCode`에 의존하지 않는다.
+partition hash algorithm은 metadata store에 저장된 값을 사용한다.
+producer가 로컬 설정으로 임의의 hash algorithm을 선택하면 안 된다.
+
+metadata store에 저장해야 하는 값:
+
+* `streamPrefix`
+* `streamVersion`
+* `shardCount`
+* `partitionKeySchema`
+* `partitionHashAlgorithm`
+* `partitionHashSeed`
+* `streamKeyFormat`
+* `metadataVersion`
+
+Producer는 `XADD` message field에도 `partitionKey`, `shardIndex`, `partitionHashAlgorithm`, `partitionHashSeed`, `metadataVersion`을 넣는다.
+Consumer는 읽은 message의 routing metadata와 현재 stream metadata snapshot이 맞는지 검증한다.
+불일치하면 handler를 실행하지 않고 DLQ 또는 운영 알람으로 보낸다.
+
+`partitionHashAlgorithm`은 JVM `hashCode`에 의존하지 않는다.
 
 권장:
 
 * MurmurHash3
 * xxHash
 * CRC32C
+
+모든 producer, consumer, coordinator는 같은 stream metadata snapshot을 사용해야 한다.
+metadata가 바뀌면 `metadataVersion`이 증가하고, instance는 더 낮은 metadata version으로 만든 routing 결과를 거부한다.
 
 순서 보장이 필요한 단위가 있다면 그 값을 `shardKey`로 사용한다.
 
@@ -341,6 +363,9 @@ metadata store가 없는 모드는 단일 instance 개발 환경에서만 허용
 
 관리할 metadata:
 
+* stream metadata
+* partition key schema
+* partition hash algorithm
 * consumer group
 * runtime instance
 * consumer thread
@@ -354,6 +379,19 @@ metadata store가 없는 모드는 단일 instance 개발 환경에서만 허용
 핵심 테이블 예:
 
 ```text
+stream_metadata
+  stream_prefix
+  stream_version
+  shard_count
+  partition_key_schema
+  partition_hash_algorithm
+  partition_hash_seed
+  stream_key_format
+  metadata_version
+  state          # ACTIVE, DRAINING, DEPRECATED
+  created_at
+  updated_at
+
 stream_runtime_instance
   instance_id
   identity_source
@@ -369,6 +407,7 @@ stream_assignment
   group_name
   stream_prefix
   stream_version
+  metadata_version
   generation
   instance_id
   shard_index
@@ -779,7 +818,7 @@ stale plan 방지:
 
 ## 16. Shard Count 변경
 
-`shard-count`는 같은 prefix 안에서 바꾸면 안 된다.
+`shard-count`, `partitionHashAlgorithm`, `partitionHashSeed`, `partitionKeySchema`는 같은 stream version 안에서 바꾸면 안 된다.
 
 예:
 
@@ -792,8 +831,12 @@ hash(user-123) % 12 = 8
 
 정책:
 
-* `shard-count`는 stream prefix version에 묶인 불변값이다.
-* shard 수를 바꾸려면 새 prefix version을 만든다.
+* routing에 영향을 주는 값은 stream metadata로 저장한다.
+* routing metadata는 stream prefix version에 묶인 불변값이다.
+* shard 수나 partition hash algorithm을 바꾸려면 새 prefix version을 만든다.
+* producer는 write 전에 metadata store에서 active stream metadata를 읽는다.
+* consumer와 coordinator는 assignment plan에 포함된 `metadataVersion`과 자기 snapshot을 비교한다.
+* metadata version이 다르면 consume을 시작하지 않고 metadata를 refresh한다.
 
 예:
 
@@ -818,7 +861,9 @@ message에는 routing metadata를 넣는다.
   "partitionKey": "user-123",
   "streamPrefix": "notification:v1",
   "shardIndex": 2,
-  "hashAlgorithm": "murmur3",
+  "partitionHashAlgorithm": "murmur3",
+  "partitionHashSeed": "default",
+  "metadataVersion": 4,
   "idempotencyKey": "..."
 }
 ```
@@ -832,8 +877,12 @@ redis-stream:
   enabled: true
   stream-prefix: notification
   stream-version: v1
-  shard-count: 12
   consumer-group: notification-consumer
+
+  stream-metadata:
+    source: METADATA_STORE
+    refresh-interval: 30s
+    fail-on-mismatch: true
 
   group:
     start-id: "$"
@@ -917,6 +966,8 @@ redis-stream:
 포함:
 
 * stream shard routing
+* metadata store 기반 stream metadata 관리
+* partition key schema / hash algorithm versioning
 * XADD IDMP / IDMPAUTO producer idempotency
 * consumer group initialization
 * consumer group join/rebalance
