@@ -171,7 +171,51 @@ coordinator:
 
 coordinator가 죽으면 lease 갱신이 멈춘다. TTL이 지나면 다른 Pod가 coordinator lease를 획득한다.
 
-### 6.3 Coordinator 책임
+### 6.3 Leader 선출 로직
+
+모든 Pod는 시작 후 coordinator lease 획득을 시도한다.
+
+선출 규칙:
+
+1. Pod가 `SET coordinatorKey value NX PX ttl`을 실행한다.
+2. 성공한 Pod가 coordinator leader가 된다.
+3. 실패한 Pod는 follower가 된다.
+4. leader는 `renew-interval`마다 lease를 갱신한다.
+5. follower는 lease owner를 주기적으로 확인한다.
+6. lease가 만료되면 follower들이 다시 `SET NX PX`를 시도한다.
+
+leader value 예:
+
+```json
+{
+  "podName": "order-api-7f9c9d9d7b-x82kd",
+  "podUid": "8b7d...",
+  "epoch": 4,
+  "lastSeenAt": "2026-05-01T10:00:10Z"
+}
+```
+
+갱신 규칙:
+
+* leader는 자신이 owner일 때만 lease를 갱신한다.
+* 갱신 전 `podUid`를 비교해 stale leader인지 확인한다.
+* owner가 아니면 즉시 follower로 내려간다.
+* 가능하면 `GET owner 확인 + PEXPIRE 갱신`은 Lua script로 원자 처리한다.
+
+stale leader 방지:
+
+* assignment plan에는 `coordinatorEpoch`을 포함한다.
+* 새 leader는 이전 epoch보다 큰 epoch으로 assignment plan을 만든다.
+* follower는 더 낮은 epoch의 assignment plan을 무시한다.
+
+장애 처리:
+
+* leader가 갑자기 죽으면 lease renew가 멈춘다.
+* 최대 `coordinator.ttl` 이후 다른 Pod가 leader가 된다.
+* 기존 shard owner들은 shard lease가 유효한 동안 기존 assignment로 계속 consume한다.
+* 새 leader가 assignment plan을 다시 저장하면 follower들이 새 generation을 적용한다.
+
+### 6.4 Coordinator 책임
 
 Coordinator만 assignment plan을 만든다.
 
