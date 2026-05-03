@@ -143,6 +143,7 @@ def test_ask_stream_rate_limit_uses_real_ip_when_forwarded_for_is_missing(monkey
         lambda **kwargs: iter([{"event": "done", "result": _stub_answer(**kwargs)}]),
     )
     client = TestClient(guestbook_app.app)
+    # X-Forwarded-For는 프록시/로드밸런서를 거칠 때만 생기므로, 로컬·직접 호출·일부 단순 배포 환경에서는 없을 수 있다.
     headers = {"X-Real-IP": "203.0.113.16"}
 
     first = client.post("/ask/stream", json=_ask_payload("first"), headers=headers)
