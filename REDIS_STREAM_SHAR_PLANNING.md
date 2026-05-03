@@ -20,23 +20,34 @@ Redis Stream은 Kafka처럼 partition assignment와 rebalance를 broker가 대�
 * pending message recovery
 * DLQ
 * processing metadata 관리
-* delivery mode 선택
+* producer idempotency 선택
+* consumer delivery mode 선택
 * 기본 metric
 
-Redis Stream consumer group은 `XREADGROUP` 사용 방식에 따라 delivery semantics가 달라진다.
+Redis Stream의 중복 방지는 producer와 consumer를 분리해서 봐야 한다.
+
+producer 측 중복 방지:
+
+* Redis 8.6 이상에서는 `XADD`의 `IDMP` / `IDMPAUTO` 옵션을 사용한다.
+* 같은 `producer-id`와 `idempotent-id` 조합이 이미 사용되었으면 새 entry를 만들지 않고 기존 entry ID를 반환한다.
+* Redis 공식 문서 기준으로 이는 at-most-once production이다.
+* producer가 Redis로 `XADD`를 보낸 뒤 응답을 받기 전에 네트워크가 끊겨 재시도하더라도 중복 entry를 만들지 않는다.
+
+consumer 측 delivery:
 
 * 기본 모드: `XREADGROUP` + `XACK`
   * Redis는 message를 PEL(Pending Entries List)에 넣는다.
   * consumer가 처리 후 `XACK`하기 전 죽으면 message는 pending으로 남아 reclaim될 수 있다.
-  * 결과적으로 at-least-once이다.
-* at-most-once 모드: `XREADGROUP ... NOACK`
+  * consumer delivery 관점에서는 at-least-once이다.
+* `NOACK` 모드: `XREADGROUP ... NOACK`
   * Redis는 message를 PEL에 넣지 않는다.
   * 읽는 순간 ACK된 것과 동일하게 취급된다.
   * consumer가 읽은 뒤 처리 전에 죽으면 message는 유실될 수 있다.
   * 대신 같은 message가 Redis consumer group에서 재전달되지 않는다.
 
-따라서 "중복 서빙 방지"가 우선이면 `NOACK` 기반 at-most-once 모드를 사용한다.
-"유실 방지"가 우선이면 `XACK` 기반 at-least-once 모드를 사용하고, handler는 idempotent해야 한다.
+따라서 producer retry로 인한 중복 stream entry를 막으려면 `XADD IDMP`를 사용한다.
+consumer 처리 유실보다 재전달 방지가 더 중요할 때만 `NOACK`을 사용한다.
+유실 방지가 우선이면 `XACK` 기반 at-least-once 모드를 사용하고, handler는 idempotent해야 한다.
 
 외부 시스템 side effect까지 포함한 "정확히 한 번 처리"는 Redis Stream 옵션만으로 만들 수 없다.
 그 경우 외부 시스템도 idempotency key 또는 transaction을 지원해야 한다.
@@ -49,6 +60,7 @@ Redis Stream consumer group은 `XREADGROUP` 사용 방식에 따라 delivery sem
 Producer
   -> shardKey hash
   -> stream:{version}:{shardIndex}
+  -> XADD IDMP/IDMPAUTO
 
 Group Coordinator
   -> active instance 목록 확인
@@ -71,7 +83,8 @@ Consumer Instance
 * shard마다 최소 1개 thread가 있어야 한다.
 * instance 증감 시 기존 shard owner는 가능한 유지한다. Kafka `StickyAssignor`와 같은 방향이다.
 * 실제 read 권한은 shard lease로 fencing한다.
-* 처리 보장 수준은 delivery mode로 선택한다.
+* producer 중복 생성 방지는 `XADD IDMP` / `IDMPAUTO`로 선택한다.
+* consumer 재전달 정책은 `XACK` / `NOACK`으로 선택한다.
 
 ---
 
@@ -360,9 +373,41 @@ FAILED
 
 ---
 
-## 8. Delivery Mode
+## 8. Message Semantics
 
-### 8.1 AT_MOST_ONCE
+### 8.1 Producer Idempotency
+
+Redis 8.6 이상에서는 `XADD`에 idempotent 옵션을 사용할 수 있다.
+모듈은 producer idempotency가 켜져 있으면 Redis server version과 stream별 IDMP 설정을 시작 시 검증해야 한다.
+
+```redis
+XADD {streamKey} IDMP {producerId} {idempotentId} * field value
+```
+
+또는 Redis가 idempotent id를 자동 생성하게 할 수 있다.
+
+```redis
+XADD {streamKey} IDMPAUTO {producerId} * field value
+```
+
+특징:
+
+* 같은 `producerId` + `idempotentId` 조합은 한 번만 stream entry를 만든다.
+* 중복 `XADD`가 들어오면 새 entry를 만들지 않고 기존 entry ID를 반환한다.
+* producer retry로 인한 중복 message 생성을 막는다.
+* `IDMP` / `IDMPAUTO`는 entry ID가 `*`일 때만 사용할 수 있다.
+* retention은 `XCFGSET`의 `IDMP-DURATION`, `IDMP-MAXSIZE`로 관리한다.
+
+설정 예:
+
+```redis
+XCFGSET {streamKey} IDMP-DURATION 300 IDMP-MAXSIZE 1000
+```
+
+이 기능은 producer side의 at-most-once production을 만든다.
+consumer가 읽은 뒤 재전달되는지 여부는 아래 consumer delivery mode가 결정한다.
+
+### 8.2 Consumer AT_MOST_ONCE
 
 Redis `XREADGROUP`을 `NOACK` 옵션과 함께 사용한다.
 
@@ -380,7 +425,7 @@ XREADGROUP GROUP {groupName} {consumerName} COUNT {count} BLOCK {blockMs} NOACK 
 
 이 모드는 "중복 서빙 방지"가 "유실 방지"보다 중요할 때 사용한다.
 
-### 8.2 AT_LEAST_ONCE
+### 8.3 Consumer AT_LEAST_ONCE
 
 Redis `XREADGROUP`을 `NOACK` 없이 사용하고, 처리 성공 후 `XACK`한다.
 
@@ -396,9 +441,9 @@ XREADGROUP GROUP {groupName} {consumerName} COUNT {count} BLOCK {blockMs} STREAM
 * 같은 message가 재전달될 수 있으므로 handler는 idempotent해야 한다.
 * pending recovery, retry, DLQ를 사용할 수 있다.
 
-### 8.3 Idempotent Processing
+### 8.4 Idempotent Processing
 
-AT_LEAST_ONCE 모드에서 중복 side effect를 막아야 하면 metadata store와 idempotency key를 사용한다.
+Consumer AT_LEAST_ONCE 모드에서 중복 side effect를 막아야 하면 metadata store와 idempotency key를 사용한다.
 
 처리 흐름:
 
@@ -786,6 +831,14 @@ redis-stream:
     block-timeout: 2s
     delivery-mode: AT_MOST_ONCE
 
+  producer:
+    idempotency:
+      enabled: true
+      mode: IDMP
+      producer-id: "${spring.application.name}"
+      idmp-duration: 300s
+      idmp-max-size: 1000
+
   metadata-store:
     type: RDBMS
     transaction-required: true
@@ -846,15 +899,16 @@ redis-stream:
 포함:
 
 * stream shard routing
+* XADD IDMP / IDMPAUTO producer idempotency
 * consumer group initialization
 * runtime instance identity 관리
 * Redis lease 기반 Group Coordinator
 * metadata store 기반 processing state 관리
-* AT_MOST_ONCE / AT_LEAST_ONCE delivery mode
+* consumer AT_MOST_ONCE / AT_LEAST_ONCE delivery mode
 * Sticky Balanced Assignment
 * shard lease fencing
 * `active-threads` 기반 instance 내부 thread 분배
-* XREADGROUP / NOACK / XACK
+* XADD IDMP / XREADGROUP / NOACK / XACK
 * XAUTOCLAIM pending recovery
 * DLQ
 * dead consumer cleanup
