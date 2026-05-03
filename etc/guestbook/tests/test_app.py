@@ -1,4 +1,5 @@
 from collections import deque
+from datetime import datetime
 from pathlib import Path
 import sys
 
@@ -7,6 +8,7 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import app as guestbook_app
+import blog_qa
 
 
 def _ask_payload(question: str = "Redis Stream pending이 뭐야?") -> dict[str, str]:
@@ -113,6 +115,59 @@ def test_ask_rate_limit_expires_old_hits(monkeypatch):
 
     assert response.status_code == 200
     assert list(guestbook_app._ask_rate_limit_hits["203.0.113.14"]) == [1060.0]
+
+
+def test_search_posts_matches_korean_query_to_english_tech_title(monkeypatch):
+    posts = [
+        blog_qa.PostRecord(
+            date="2026-04-01",
+            date_obj=datetime(2026, 4, 1),
+            title="Coroutine and virtualThread",
+            parent="Kotlin",
+            category="Backend",
+            url="https://example.com/coroutine-virtual-thread",
+            file_path="/coroutine-virtual-thread",
+            search_text=blog_qa._normalize_text("Coroutine and virtualThread"),
+            content="",
+        ),
+        blog_qa.PostRecord(
+            date="2026-04-02",
+            date_obj=datetime(2026, 4, 2),
+            title="Redis Stream 운영하기",
+            parent="Redis",
+            category="Backend",
+            url="https://example.com/redis-stream",
+            file_path="/redis-stream",
+            search_text=blog_qa._normalize_text("Redis Stream 운영하기"),
+            content="",
+        ),
+    ]
+    monkeypatch.setattr(blog_qa, "collect_posts", lambda: posts)
+
+    results = blog_qa.search_posts("코루틴 포스팅 찾아줘")
+
+    assert [post.title for post in results] == ["Coroutine and virtualThread"]
+
+
+def test_search_posts_matches_korean_virtual_thread_query_to_camel_case_title(monkeypatch):
+    posts = [
+        blog_qa.PostRecord(
+            date="2026-04-01",
+            date_obj=datetime(2026, 4, 1),
+            title="Coroutine and virtualThread",
+            parent="JVM",
+            category="Backend",
+            url="https://example.com/coroutine-virtual-thread",
+            file_path="/coroutine-virtual-thread",
+            search_text=blog_qa._normalize_text("Coroutine and virtualThread"),
+            content="",
+        )
+    ]
+    monkeypatch.setattr(blog_qa, "collect_posts", lambda: posts)
+
+    results = blog_qa.search_posts("가상 스레드")
+
+    assert [post.title for post in results] == ["Coroutine and virtualThread"]
 
 
 def test_ask_stream_rate_limit_rejects_second_request_from_same_ip(monkeypatch):
