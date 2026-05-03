@@ -132,3 +132,23 @@ def test_ask_stream_rate_limit_rejects_second_request_from_same_ip(monkeypatch):
     assert first.status_code == 200
     assert second.status_code == 429
     assert second.json()["detail"] == "Too many requests. Limit is 1 per minute."
+
+
+def test_ask_stream_rate_limit_uses_real_ip_when_forwarded_for_is_missing(monkeypatch):
+    monkeypatch.setattr(guestbook_app, "ASK_RATE_LIMIT_PER_MINUTE", 1)
+    monkeypatch.setattr(guestbook_app, "_public_mcp_server_url", lambda request: "https://lowfidev.cloud/mcp/")
+    monkeypatch.setattr(
+        guestbook_app,
+        "stream_visitor_question",
+        lambda **kwargs: iter([{"event": "done", "result": _stub_answer(**kwargs)}]),
+    )
+    client = TestClient(guestbook_app.app)
+    headers = {"X-Real-IP": "203.0.113.16"}
+
+    first = client.post("/ask/stream", json=_ask_payload("first"), headers=headers)
+    second = client.post("/ask/stream", json=_ask_payload("second"), headers=headers)
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert second.json()["detail"] == "Too many requests. Limit is 1 per minute."
+    assert "203.0.113.16" in guestbook_app._ask_rate_limit_hits
