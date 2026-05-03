@@ -20,18 +20,26 @@ Redis Stream은 Kafka처럼 partition assignment와 rebalance를 broker가 대�
 * pending message recovery
 * DLQ
 * processing metadata 관리
-* application-level exactly-once 처리 보조
+* delivery mode 선택
 * 기본 metric
 
-Redis Stream 자체는 at-least-once이다. 이 모듈은 metadata store를 사용해 application-level exactly-once를 제공한다.
+Redis Stream consumer group은 `XREADGROUP` 사용 방식에 따라 delivery semantics가 달라진다.
 
-정확한 의미:
+* 기본 모드: `XREADGROUP` + `XACK`
+  * Redis는 message를 PEL(Pending Entries List)에 넣는다.
+  * consumer가 처리 후 `XACK`하기 전 죽으면 message는 pending으로 남아 reclaim될 수 있다.
+  * 결과적으로 at-least-once이다.
+* at-most-once 모드: `XREADGROUP ... NOACK`
+  * Redis는 message를 PEL에 넣지 않는다.
+  * 읽는 순간 ACK된 것과 동일하게 취급된다.
+  * consumer가 읽은 뒤 처리 전에 죽으면 message는 유실될 수 있다.
+  * 대신 같은 message가 Redis consumer group에서 재전달되지 않는다.
 
-* 같은 messageId/idempotencyKey는 한 번만 성공 처리된 것으로 기록한다.
-* 이미 성공 처리된 message는 다시 읽혀도 handler side effect를 실행하지 않는다.
-* handler side effect와 processed 기록은 같은 transactional boundary 안에서 처리되어야 한다.
+따라서 "중복 서빙 방지"가 우선이면 `NOACK` 기반 at-most-once 모드를 사용한다.
+"유실 방지"가 우선이면 `XACK` 기반 at-least-once 모드를 사용하고, handler는 idempotent해야 한다.
 
-외부 시스템 side effect까지 포함한 절대적 exactly-once는 외부 시스템도 idempotency key 또는 transaction을 지원해야 한다.
+외부 시스템 side effect까지 포함한 "정확히 한 번 처리"는 Redis Stream 옵션만으로 만들 수 없다.
+그 경우 외부 시스템도 idempotency key 또는 transaction을 지원해야 한다.
 
 ---
 
@@ -51,10 +59,8 @@ Consumer Instance
   -> 자기 instance에 배정된 shard 확인
   -> shard lease 획득
   -> Redis XREADGROUP
-  -> metadata store에서 message claim
   -> handler 처리
-  -> processed 기록
-  -> XACK
+  -> delivery mode에 따라 XACK 또는 NOACK
 ```
 
 핵심 정책:
@@ -65,7 +71,7 @@ Consumer Instance
 * shard마다 최소 1개 thread가 있어야 한다.
 * instance 증감 시 기존 shard owner는 가능한 유지한다. Kafka `StickyAssignor`와 같은 방향이다.
 * 실제 read 권한은 shard lease로 fencing한다.
-* 처리 성공 여부는 metadata store에 기록한다.
+* 처리 보장 수준은 delivery mode로 선택한다.
 
 ---
 
@@ -284,13 +290,13 @@ Follower instance는 assignment를 직접 확정하지 않는다. 저장된 assi
 
 * 운영 기본값: RDBMS(PostgreSQL/MySQL)
 * 경량 환경: Redis Hash/JSON
-* 강한 exactly-once 요구: business DB와 같은 RDBMS
+* 강한 idempotency 요구: business DB와 같은 RDBMS
 
-강한 처리 보장이 필요하면 business side effect와 metadata update가 같은 DB transaction 안에 있어야 한다.
+강한 idempotency 보장이 필요하면 business side effect와 metadata update가 같은 DB transaction 안에 있어야 한다.
 따라서 신규 stream 기능을 사용하려면 metadata store를 먼저 구성해야 한다.
 
 metadata store가 없는 모드는 단일 instance 개발 환경에서만 허용한다.
-이 경우 shard assignment, consumer cleanup, exactly-once 보장은 제공하지 않는다.
+이 경우 shard assignment, consumer cleanup, delivery mode 관리 보장은 제공하지 않는다.
 
 관리할 metadata:
 
@@ -354,9 +360,45 @@ FAILED
 
 ---
 
-## 8. Application-level Exactly-once 처리
+## 8. Delivery Mode
 
-Redis Stream은 같은 메시지를 다시 전달할 수 있다. 따라서 exactly-once는 metadata store와 idempotency로 만든다.
+### 8.1 AT_MOST_ONCE
+
+Redis `XREADGROUP`을 `NOACK` 옵션과 함께 사용한다.
+
+```redis
+XREADGROUP GROUP {groupName} {consumerName} COUNT {count} BLOCK {blockMs} NOACK STREAMS {streamKey} >
+```
+
+특징:
+
+* message를 PEL에 넣지 않는다.
+* 별도 `XACK`가 필요 없다.
+* consumer가 읽은 뒤 처리 전에 죽으면 message는 유실될 수 있다.
+* Redis consumer group 관점에서 같은 message를 다시 전달하지 않는다.
+* pending recovery, retry, DLQ는 적용할 수 없다.
+
+이 모드는 "중복 서빙 방지"가 "유실 방지"보다 중요할 때 사용한다.
+
+### 8.2 AT_LEAST_ONCE
+
+Redis `XREADGROUP`을 `NOACK` 없이 사용하고, 처리 성공 후 `XACK`한다.
+
+```redis
+XREADGROUP GROUP {groupName} {consumerName} COUNT {count} BLOCK {blockMs} STREAMS {streamKey} >
+```
+
+특징:
+
+* message를 PEL에 넣는다.
+* 처리 성공 후 `XACK`해야 한다.
+* consumer가 죽으면 message는 pending으로 남고 reclaim될 수 있다.
+* 같은 message가 재전달될 수 있으므로 handler는 idempotent해야 한다.
+* pending recovery, retry, DLQ를 사용할 수 있다.
+
+### 8.3 Idempotent Processing
+
+AT_LEAST_ONCE 모드에서 중복 side effect를 막아야 하면 metadata store와 idempotency key를 사용한다.
 
 처리 흐름:
 
@@ -389,7 +431,7 @@ ON CONFLICT (idempotency_key) DO NOTHING;
 
 * commit 전 consumer 죽음: metadata가 `CLAIMED`로 남고 나중에 reclaim된다.
 * commit 후 ACK 전 consumer 죽음: Redis가 다시 전달하지만 metadata가 `PROCESSED`라 side effect 없이 ACK된다.
-* 외부 API 호출 후 metadata commit 전 죽음: 외부 API가 idempotency key를 지원하지 않으면 exactly-once 보장 불가.
+* 외부 API 호출 후 metadata commit 전 죽음: 외부 API가 idempotency key를 지원하지 않으면 중복 side effect 방지 불가.
 
 ---
 
@@ -619,6 +661,9 @@ shard 9 -> thread-4, thread-5
 
 ## 14. Pending Recovery / Retry / DLQ
 
+이 섹션은 `delivery-mode: AT_LEAST_ONCE`에서만 적용한다.
+`AT_MOST_ONCE`는 `NOACK`을 사용하므로 message가 PEL에 남지 않는다.
+
 Redis Stream은 consumer가 죽으면 message를 PEL에 남긴다. 모듈은 PEL recovery와 metadata store의 processing state를 함께 사용한다.
 
 Recovery:
@@ -739,6 +784,7 @@ redis-stream:
     active-threads: 4
     batch-size: 50
     block-timeout: 2s
+    delivery-mode: AT_MOST_ONCE
 
   metadata-store:
     type: RDBMS
@@ -804,11 +850,11 @@ redis-stream:
 * runtime instance identity 관리
 * Redis lease 기반 Group Coordinator
 * metadata store 기반 processing state 관리
-* application-level exactly-once 처리 흐름
+* AT_MOST_ONCE / AT_LEAST_ONCE delivery mode
 * Sticky Balanced Assignment
 * shard lease fencing
 * `active-threads` 기반 instance 내부 thread 분배
-* XREADGROUP / XACK
+* XREADGROUP / NOACK / XACK
 * XAUTOCLAIM pending recovery
 * DLQ
 * dead consumer cleanup
