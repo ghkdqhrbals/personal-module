@@ -186,10 +186,7 @@ XADD {streamKey} IDMP {producerName} {idempotencyKey} * field value
 * 같은 business event retry는 같은 idempotency key를 재사용한다.
 * 다른 business event는 다른 idempotency key를 사용한다.
 * `producerName`은 같은 producer 논리 주체를 나타내는 안정적인 이름이다.
-* `XCFGSET`은 애플리케이션 부팅 때 반복 적용하지 않는다.
-* IDMP retention 설정은 stream provisioning 또는 변경 관리 절차로만 수행한다.
-
-`XCFGSET`은 stream의 IDMP map에 영향을 줄 수 있으므로 운영 중 routine config처럼 재적용하면 안 된다.
+* idempotency key의 보관 기간은 business replay/idempotency 요구사항과 맞춰 운영한다.
 
 ---
 
