@@ -517,25 +517,70 @@ MVP는 plain Rendezvous Hashing을 사용한다.
 * snapshot 불일치 동안에는 중복 read 대신 일부 shard가 잠시 미할당될 수 있다.
 * 미할당 시간은 heartbeat TTL, lease TTL, scan interval로 제한한다.
 
+### 10.5 Declarative Target Assignment
+
+KIP-848의 핵심은 coordinator가 declarative target assignment를 만들고, 각 member가 자기 current assignment를 target으로 독립적으로 reconcile하는 구조이다.
+이 모듈은 Kafka coordinator를 만들지 않지만 같은 모델을 단순화해서 사용한다.
+
+용어 매핑:
+
+```text
+group metadata      = stream metadata + assignment config + active instance list
+group epoch         = membershipEpoch
+target assignment   = Rendezvous Hashing으로 계산한 desired shard owner map
+assignment epoch    = membershipEpoch used to compute target assignment
+current assignment  = 현재 instance가 lease를 보유하고 처리 중인 shard set
+member epoch        = instance가 마지막으로 reconcile에 성공한 membershipEpoch
+```
+
+target assignment는 별도 테이블에 저장하지 않는다.
+같은 `consumerView`를 가진 모든 Pod가 같은 target assignment를 계산할 수 있어야 한다.
+
+```text
+targetAssignment(view) =
+  for each shardIndex:
+    shardIndex -> owner(shardIndex, view.activeInstanceIds)
+```
+
+current assignment는 Pod local worker 상태와 shard lease의 조합이다.
+
+```text
+currentAssignment(instanceId) =
+  lease.owner == instanceId
+  and lease.membershipEpoch == local.memberEpoch
+  and worker.state in [READING, RETURNING]
+```
+
+member epoch 정책:
+
+* Pod는 새 `membershipEpoch`을 관측하면 target assignment를 다시 계산한다.
+* 반환해야 할 shard의 신규 read를 멈추기 전에는 member epoch을 올리지 않는다.
+* 반환 대상 shard가 `RETURNING`에 들어가고, 새로 받을 shard acquire loop가 시작되면 local `memberEpoch`을 새 값으로 갱신한다.
+* shard lease renew는 lease의 `membershipEpoch`과 local `memberEpoch`이 일치할 때만 허용한다.
+* 이 값은 Kafka member epoch처럼 stale member를 fence하는 용도로 사용한다.
+
+이 모델의 목표는 group-wide synchronization barrier 없이 각 Pod가 자기 current assignment를 target assignment로 점진적으로 수렴시키는 것이다.
+
 ---
 
 ## 11. Scale In / Scale Out
 
 ### 11.0 Kafka Rebalance Protocol 적용 원칙
 
-Kafka rebalance protocol에서 가져올 원칙과 버릴 원칙을 분리한다.
+KIP-848의 rebalance protocol에서 가져올 원칙과 버릴 원칙을 분리한다.
 
 참고한 Kafka protocol:
 
 * eager rebalance: 모든 partition을 revoke한 뒤 새 assignment를 받는다.
 * cooperative rebalance: 이동해야 하는 partition만 revoke하고, 유지되는 partition은 계속 처리한다.
-* server-side coordination: broker coordinator가 target assignment와 epoch을 관리하고 consumer는 reconcile한다.
+* next-generation rebalance: target assignment를 선언하고 각 member가 current assignment를 target으로 reconcile한다.
 
 이 모듈의 선택:
 
 * eager 방식은 사용하지 않는다. consumer 하나가 추가될 때 모든 shard를 멈추면 Pod rolling deploy와 scale-out 때 전체 처리량이 떨어진다.
-* server-side coordination도 구현하지 않는다. Redis Stream에는 Kafka broker coordinator가 없고, 이를 애플리케이션에서 재구현하면 leader election과 assignment plan 전파가 필요해진다.
-* 기본 방식은 cooperative rebalance이다. 새 Pod 추가 또는 제거로 owner가 바뀌는 shard만 `RETURNING`으로 전환하고, 나머지 shard는 계속 `READING`한다.
+* Kafka broker coordinator는 구현하지 않는다. Redis Stream에는 broker-side group coordinator가 없고, 이를 애플리케이션에서 재구현하면 leader election과 assignment plan 전파가 필요해진다.
+* KIP-848의 declarative target assignment와 reconciliation loop 개념은 채택한다.
+* 기본 방식은 coordinatorless cooperative rebalance이다. 새 Pod 추가 또는 제거로 owner가 바뀌는 shard만 `RETURNING`으로 전환하고, 나머지 shard는 계속 `READING`한다.
 
 Kafka 개념과 이 모듈의 대응:
 
@@ -544,14 +589,16 @@ Kafka consumer group member    -> runtime instance / Pod
 Kafka partition                -> stream shard
 Kafka group coordinator        -> 없음
 Kafka heartbeat                -> registry heartbeat
-Kafka generation / group epoch -> membershipEpoch
-Kafka assignment               -> deterministic Rendezvous Hashing result
+Kafka group epoch              -> membershipEpoch
+Kafka target assignment        -> Rendezvous Hashing desired owner map
+Kafka current assignment       -> current lease owner + worker state
+Kafka member epoch             -> local memberEpoch / lease membershipEpoch
 Kafka partition revocation     -> shard RETURNING
 Kafka partition assignment     -> shard ACQUIRING + lease acquire
 Kafka offset commit on revoke  -> processing metadata 기록 + XACK
 ```
 
-따라서 rebalance는 "전체 정지 후 재할당"이 아니라 "local view 변경 감지 후 shard별 reconcile"로 동작한다.
+따라서 rebalance는 "전체 정지 후 재할당"이 아니라 "target assignment를 계산하고 shard별 current assignment를 reconcile"하는 방식으로 동작한다.
 
 ### 11.1 Rebalance Trigger
 
@@ -566,24 +613,29 @@ trigger:
 * stream metadata version 변경
 * assignment algorithm/seed 변경. 단, 같은 stream version 안에서는 변경 금지
 
-view가 바뀌면 각 instance는 다음 세트를 계산한다.
+view가 바뀌면 각 instance는 먼저 target assignment를 계산한다.
 
 ```text
-currentOwnedShards = lease를 보유하고 read 중인 shard
-nextOwnedShards = newView 기준 owner(instanceId) == self 인 shard
+targetAssignment = targetAssignment(newView)
+targetOwnedShards = targetAssignment[instanceId]
+currentOwnedShards = currentAssignment(instanceId)
 
-shardsToKeep = currentOwnedShards ∩ nextOwnedShards
-shardsToReturn = currentOwnedShards - nextOwnedShards
-shardsToAcquire = nextOwnedShards - currentOwnedShards
+shardsToKeep = currentOwnedShards ∩ targetOwnedShards
+shardsToReturn = currentOwnedShards - targetOwnedShards
+shardsToAcquire = targetOwnedShards - currentOwnedShards
 ```
 
 처리 순서:
 
-1. `shardsToReturn` 신규 read 중단
-2. `shardsToKeep` lease renew 지속
-3. `shardsToAcquire` lease 획득 시도
-4. 반환 완료 또는 lease 만료 후 새 owner가 pending recovery
-5. 새 owner가 신규 read 시작
+1. `shardsToKeep`은 기존 member epoch으로 계속 read한다.
+2. `shardsToReturn`은 신규 read를 중단하고 `RETURNING`으로 전환한다.
+3. local `memberEpoch`을 새 `membershipEpoch`으로 갱신한다.
+4. `shardsToAcquire`는 lease 획득을 시도한다.
+5. 반환 완료 또는 lease 만료 후 새 owner가 pending recovery를 수행한다.
+6. 새 owner가 신규 read를 시작한다.
+
+KIP-848처럼 각 Pod는 target assignment로 독립 수렴한다.
+다만 target assignment 저장과 의존성 해소는 Kafka coordinator가 아니라 deterministic assignment와 shard lease CAS가 담당한다.
 
 ### 11.2 Shard Return Protocol
 
@@ -692,16 +744,30 @@ NONE -> ACQUIRING -> RECOVERING_PENDING -> READING -> RETURNING -> NONE
 11. 기존 owner는 `shardsToKeep`을 계속 `READING`한다.
 12. 새 owner는 `shardsToAcquire`를 `ACQUIRING`으로 전환한다.
 
-이 절차는 Kafka cooperative protocol의 round를 다음처럼 단순화한 것이다.
+이 절차는 KIP-848의 reconciliation 흐름을 다음처럼 단순화한 것이다.
 
 ```text
-round 1: 모든 Pod가 새 member view를 관측하고, 이동 대상 shard만 RETURNING 처리한다.
-round 2: 반환된 shard lease가 만료되거나 release hint가 기록되면 새 owner가 ACQUIRING 처리한다.
-converged: 모든 shard가 새 membershipEpoch의 lease owner를 가진다.
+1. group metadata changed:
+   Pod join/leave 또는 metadata 변경으로 membershipEpoch이 바뀐다.
+
+2. target assignment computed:
+   각 Pod가 같은 view로 targetAssignment를 계산한다.
+
+3. member reconciliation:
+   각 Pod가 currentAssignment와 targetAssignment를 비교한다.
+
+4. revoke first:
+   target에 없는 shard만 RETURNING 처리한다.
+
+5. assign incrementally:
+   lease가 비워진 shard만 새 owner가 ACQUIRING 처리한다.
+
+6. converged:
+   모든 shard lease가 target owner와 새 membershipEpoch을 가진다.
 ```
 
-round 사이에 중앙 barrier는 없다.
-각 Pod가 자기 shard 상태를 reconcile하고, lease CAS가 최종 순서를 만든다.
+중앙 barrier는 없다.
+각 Pod가 자기 shard 상태를 reconcile하고, lease CAS가 shard별 dependency를 해소한다.
 
 #### 이동 대상 shard 판정
 
@@ -709,11 +775,11 @@ round 사이에 중앙 barrier는 없다.
 
 ```text
 currentOwnedShards = 현재 lease를 renew 중이고 worker가 READING 또는 RETURNING인 shard
-nextOwnedShards = newView에서 owner(shard) == self인 shard
+targetOwnedShards = targetAssignment[newView][self]
 
-shardsToKeep = currentOwnedShards ∩ nextOwnedShards
-shardsToReturn = currentOwnedShards - nextOwnedShards
-shardsToAcquire = nextOwnedShards - currentOwnedShards
+shardsToKeep = currentOwnedShards ∩ targetOwnedShards
+shardsToReturn = currentOwnedShards - targetOwnedShards
+shardsToAcquire = targetOwnedShards - currentOwnedShards
 ```
 
 중요한 제약:
@@ -732,16 +798,19 @@ fun reconcileShardOwnership(view: ConsumerView) {
         .map { it.shardIndex }
         .toSet()
 
-    val nextOwned = allShards
+    val targetOwned = allShards
         .filter { shard -> ownerOf(shard, view) == local.instanceId }
         .toSet()
 
-    val shardsToKeep = currentOwned intersect nextOwned
-    val shardsToReturn = currentOwned - nextOwned
-    val shardsToAcquire = nextOwned - currentOwned
+    val shardsToKeep = currentOwned intersect targetOwned
+    val shardsToReturn = currentOwned - targetOwned
+    val shardsToAcquire = targetOwned - currentOwned
 
     shardsToKeep.forEach { shardWorkers[it].continueReading() }
     shardsToReturn.forEach { shardWorkers[it].startReturning() }
+
+    local.memberEpoch = view.membershipEpoch
+
     shardsToAcquire.forEach { startAcquireWorker(it, view) }
 }
 ```
@@ -860,7 +929,7 @@ MVP에서 필요한 Redis primitive는 다음으로 제한한다.
 * registry heartbeat: `SET key value PX ttl`
 * active registry scan: metadata store의 instance registry 조회
 * lease acquire: `SET leaseKey value NX PX ttl`
-* lease renew: Lua CAS with `instanceId + leaseToken + membershipEpoch`
+* lease renew: Lua CAS with `instanceId + leaseToken + membershipEpoch + memberEpoch`
 * lease release hint: Lua CAS로 `state=RELEASING` 갱신
 * pending recovery: `XPENDING`, `XAUTOCLAIM`, `XACK`
 
@@ -974,6 +1043,7 @@ lease value:
   "metadataVersion": 4,
   "assignmentConfigVersion": 3,
   "membershipEpoch": "6d3a...",
+  "memberEpoch": "6d3a...",
   "state": "OWNED",
   "expiresAt": "2026-05-01T10:00:20Z"
 }
@@ -984,7 +1054,7 @@ lease value:
 * `SET key value NX PX ttl`로 최초 획득한다.
 * renew는 owner와 token이 일치할 때만 Lua로 갱신한다.
 * owner가 아니면 갱신하지 않는다.
-* renew 시 `metadataVersion`, `assignmentConfigVersion`, `membershipEpoch`이 현재 local view와 같아야 한다.
+* renew 시 `metadataVersion`, `assignmentConfigVersion`, `membershipEpoch`, `memberEpoch`이 현재 local view와 같아야 한다.
 * lease 갱신 실패 시 해당 shard의 신규 read를 즉시 중단한다.
 * graceful return 중에는 lease state를 `RELEASING`으로 바꿀 수 있다.
 * `RELEASING`은 새 owner에게 lease TTL 만료가 가까워졌다는 신호를 주기 위한 hint이다.
@@ -1343,3 +1413,4 @@ MVP와 production baseline은 Coordinatorless 설계를 선택한다.
 ## 21. References
 
 * NashTech Blog, [Apache Kafka Rebalancing Series: Understanding Kafka Rebalancing Protocols](https://blog.nashtechglobal.com/apache-kafka-rebalancing-series-understanding-kafka-rebalancing-protocols/)
+* Apache Kafka Wiki, [KIP-848: The Next Generation of the Consumer Rebalance Protocol](https://cwiki.apache.org/confluence/display/KAFKA/KIP-848%3A+The+Next+Generation+of+the+Consumer+Rebalance+Protocol)
