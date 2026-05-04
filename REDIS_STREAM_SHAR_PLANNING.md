@@ -13,15 +13,16 @@
 9. **실제 read 권한은 shard lease로 fencing한다. owner로 계산되더라도 lease를 얻지 못하면 `XREADGROUP`을 수행하지 않는다.**
 10. **scale in/out 시 shard 반환은 신규 read 중단, in-flight 처리 완료, lease renew 중단, 새 owner acquire 순서로 진행한다.**
 11. **graceful handoff가 timeout 안에 끝나지 않으면 lease TTL 만료 후 forced acquire로 전환하고, PEL recovery와 idempotency로 복구한다.**
-12. **shard 단위 순서를 보장하기 위해 하나의 shard는 하나의 worker만 읽고, 같은 shard의 handler를 병렬 실행하지 않는다.**
-13. **pending recovery도 shard owner의 단일 worker만 수행하며, pending message를 먼저 처리한 뒤 신규 message read를 재개한다.**
-14. **consumer delivery는 `XREADGROUP` 후 정상 처리 완료 시 `XACK`하는 at-least-once 방식만 사용한다. `NOACK`은 사용하지 않는다.**
-15. **producer retry로 인한 중복 stream entry는 Redis 8.6+ `XADD IDMP {producerName} {idempotencyKey}`로 방지한다.**
-16. **`IDMPAUTO`는 사용하지 않고, producer가 business event 단위 idempotency key를 직접 생성하고 retry 시 같은 key를 재사용한다.**
-17. **producer, consumer, assignment 계산은 모두 metadata store의 stream metadata를 기준으로 하며, hot path에서는 immutable snapshot cache를 사용한다.**
-18. **shard count, partition key schema, partition hash algorithm, assignment algorithm은 같은 stream version 안에서 불변이다.**
-19. **shard count나 hash/assignment algorithm을 바꿔야 하면 새 stream version을 만들고 dual-read/write 및 backlog drain 절차로 전환한다.**
-20. **metadata store에는 stream metadata, runtime instance registry, processing state, idempotency key, retry/DLQ 기록과 retention 정책이 필요하다.**
+12. **정상 처리 경로에서는 shard 단위 순서를 보장하기 위해 하나의 shard는 하나의 worker만 읽고, 같은 shard의 handler를 병렬 실행하지 않는다.**
+13. **owner 전환 중 ACK 되지 않은 pending message는 Redis PEL의 `min-idle-time`이 지나야 안전하게 reclaim할 수 있으므로, strict ordering과 빠른 failover는 동시에 만족하기 어렵다.**
+14. **pending recovery도 shard owner의 단일 worker만 수행하며, pending message를 먼저 처리한 뒤 신규 message read를 재개한다.**
+15. **consumer delivery는 `XREADGROUP` 후 정상 처리 완료 시 `XACK`하는 at-least-once 방식만 사용한다. `NOACK`은 사용하지 않는다.**
+16. **producer retry로 인한 중복 stream entry는 Redis 8.6+ `XADD IDMP {producerName} {idempotencyKey}`로 방지한다.**
+17. **`IDMPAUTO`는 사용하지 않고, producer가 business event 단위 idempotency key를 직접 생성하고 retry 시 같은 key를 재사용한다.**
+18. **producer, consumer, assignment 계산은 모두 metadata store의 stream metadata를 기준으로 하며, hot path에서는 immutable snapshot cache를 사용한다.**
+19. **shard count, partition key schema, partition hash algorithm, assignment algorithm은 같은 stream version 안에서 불변이다.**
+20. **shard count나 hash/assignment algorithm을 바꿔야 하면 새 stream version을 만들고 dual-read/write 및 backlog drain 절차로 전환한다.**
+21. **metadata store에는 stream metadata, runtime instance registry, processing state, idempotency key, retry/DLQ 기록과 retention 정책이 필요하다.**
 
 ---
 
@@ -47,7 +48,7 @@ Redis Stream은 Kafka처럼 broker가 partition assignment와 rebalance를 관�
 
 ## 2. Goals
 
-* shard 단위 순서 보장
+* 정상 처리 경로에서 shard 단위 순서 보장
 * scale-in/out 시 자동 shard 재분배
 * 별도 coordinator leader election 제거
 * producer와 consumer가 같은 partitioning metadata를 사용
@@ -62,6 +63,7 @@ Redis Stream은 Kafka처럼 broker가 partition assignment와 rebalance를 관�
 
 * global ordering
 * Kafka 수준의 broker-managed consumer group 구현
+* shard owner 장애/전환 중에도 지연 없이 유지되는 strict ordering
 * 동적 shard-count 변경
 * Redis Cluster resharding 자동 대응
 * hot shard 자동 split
@@ -95,7 +97,8 @@ Runtime Instance
 * assignment algorithm은 deterministic 해야 한다.
 * 하나의 shard는 하나의 runtime instance만 lease owner가 될 수 있다.
 * shard owner instance 내부에서도 하나의 shard는 하나의 worker thread만 읽는다.
-* 순서 보장은 shard 단위로만 제공한다.
+* 정상 처리 경로의 순서 보장은 shard 단위로만 제공한다.
+* owner 장애/전환 중 strict ordering은 `min-idle-time` 만큼 shard 처리를 멈추는 방식으로만 지킬 수 있다.
 * 실제 read 권한은 shard lease로 fencing한다.
 * consumer는 `NOACK`을 사용하지 않는다.
 
@@ -854,6 +857,8 @@ pending recovery 기준:
 * recovery idle threshold는 `lease-ttl + renew-interval`보다 크게 둔다.
 * 새 owner는 lease를 획득한 shard의 pending message만 reclaim한다.
 * pending 처리와 신규 read를 같은 shard에서 동시에 수행하지 않는다.
+* Redis는 pending message의 idle time이 `min-idle-time`보다 작으면 `XAUTOCLAIM`으로 안전하게 회수할 수 없다.
+* 따라서 이전 owner가 message를 읽은 직후 죽거나 멈추면, 새 owner는 `min-idle-time`이 지날 때까지 해당 message를 reclaim하지 못할 수 있다.
 
 #### 동시성 제어
 
@@ -1102,6 +1107,8 @@ shard 9 -> worker-1
 * 같은 shard의 message는 같은 worker에서 순차 처리한다.
 * shard 간 순서는 보장하지 않는다.
 * 한 shard의 handler를 병렬 실행하지 않는다.
+* 이 순서 보장은 owner가 정상적으로 살아 있고 shard handoff가 graceful하게 끝나는 경로를 기준으로 한다.
+* owner 장애나 forced handoff 중에는 Redis PEL reclaim의 `min-idle-time` 때문에 strict ordering과 빠른 failover를 동시에 보장할 수 없다.
 
 운영 주의:
 
@@ -1122,6 +1129,27 @@ Redis Stream은 consumer가 죽으면 message를 PEL에 남긴다.
 * pending message를 먼저 처리하고 ACK한 뒤 신규 message read를 재개한다.
 * 처리 실패 message를 건너뛰고 뒤 message를 먼저 ACK하면 shard 내부 순서 보장이 깨질 수 있다.
 * max attempts 초과로 DLQ 이동 후 ACK하는 것은 순서 보장을 포기하고 운영 보상 처리로 넘기는 명시적 정책이다.
+
+owner 전환 중 순서보장 한계:
+
+* Redis Stream consumer group은 pending message를 PEL에 남기지만, 다른 consumer가 즉시 가져가도록 보장하지 않는다.
+* `XAUTOCLAIM`은 `min-idle-time`을 만족한 pending message만 reclaim한다.
+* consumer-1이 shard message `m1`을 읽고 ACK 전에 멈춘 직후 consumer-2가 shard owner가 되면, consumer-2는 `m1`의 idle time이 충분히 쌓이기 전까지 reclaim하지 못할 수 있다.
+* 이 상태에서 consumer-2가 신규 message `m2`를 `XREADGROUP ... >`로 읽으면 `m1 -> m2` 순서가 깨질 수 있다.
+* 따라서 strict shard ordering 모드에서는 pending recovery가 완료되기 전까지 신규 read를 시작하지 않는다.
+* 이 선택은 순서를 지키는 대신 shard failover 지연을 `min-idle-time` 이상 허용한다는 뜻이다.
+
+운영 모드:
+
+```text
+STRICT_ORDER
+  pending recovery 완료 전 신규 read 금지
+  owner 장애 시 min-idle-time만큼 shard 처리 지연 가능
+
+FAST_FAILOVER
+  pending reclaim 가능 여부와 무관하게 신규 read 재개 가능
+  shard 내부 순서 보장은 포기하고 idempotency/retry/DLQ로 보정
+```
 
 Recovery:
 
@@ -1274,7 +1302,7 @@ redis-stream:
     batch-size: 50
     block-timeout: 2s
     ack-mode: ACK_AFTER_SUCCESS
-    ordering: SHARD
+    ordering: STRICT_ORDER
 
   producer:
     idempotency:
@@ -1298,6 +1326,7 @@ redis-stream:
     min-idle-time: 60s
     scan-interval: 30s
     batch-size: 100
+    block-new-read-until-recovered: true
 
   retry:
     max-attempts: 5
@@ -1346,6 +1375,8 @@ redis-stream:
 
 * assignment 결과가 명시적으로 저장된다.
 * 운영자가 현재 plan을 읽기 쉽다.
+* 중앙에서 eager 또는 cooperative rebalance 정책을 명시적으로 선택하고 강제할 수 있다.
+* KIP-848처럼 target assignment를 저장하고 member별 reconcile 상태를 추적할 수 있다.
 
 단점:
 
@@ -1354,6 +1385,7 @@ redis-stream:
 * assignment plan apply protocol이 복잡하다.
 * scale-in/out 테스트 범위가 커진다.
 * Kafka coordinator를 애플리케이션 레벨에서 다시 구현하게 된다.
+* 이 모듈의 목표인 단순한 운영 모델과 맞지 않는다.
 
 ### Coordinatorless 설계
 
@@ -1370,12 +1402,16 @@ redis-stream:
 * member snapshot이 일시적으로 다르면 일부 shard가 잠시 미할당될 수 있다.
 * 현재 owner를 보려면 각 instance의 계산 결과 또는 lease 상태를 봐야 한다.
 * 완벽한 균등 분배는 보장하지 않는다.
+* Redis PEL reclaim은 `min-idle-time` 제약이 있어 owner 장애 직후 pending message를 즉시 회수할 수 없다.
+* strict shard ordering을 선택하면 owner 전환 시 shard 처리가 지연될 수 있다.
+* 빠른 failover를 선택하면 shard 내부 순서 보장을 포기해야 한다.
 
 결론:
 
 MVP와 production baseline은 Coordinatorless 설계를 선택한다.
 균등 분배 문제가 실제로 관측되면 bounded-load rendezvous hashing을 추가한다.
 중앙 Coordinator는 마지막 선택지로 둔다.
+다만 Redis Stream PEL reclaim 특성상 coordinatorless cooperative rebalance도 장애 전환 중 strict ordering을 즉시 보장하지는 못한다.
 
 ---
 
@@ -1390,7 +1426,7 @@ MVP와 production baseline은 Coordinatorless 설계를 선택한다.
 * runtime instance registry
 * Rendezvous Hashing 기반 coordinatorless shard assignment
 * shard lease fencing
-* shard 단위 순서 보장
+* 정상 처리 경로의 shard 단위 순서 보장
 * XREADGROUP + ACK_AFTER_SUCCESS
 * XAUTOCLAIM pending recovery
 * DLQ
