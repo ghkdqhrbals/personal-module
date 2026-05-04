@@ -2,8 +2,8 @@
 
 ## 0. 고려사항 요약
 
-1. **Redis Stream은 Kafka처럼 broker가 partition assignment를 관리하지 않으므로, 애플리케이션 레벨에서 shard ownership을 정해야 한다.**
-2. **중앙 Group Coordinator를 직접 구현하면 leader election, stale leader fencing, assignment plan 전파, partial rebalance 복구까지 책임져야 하므로 유지보수 비용이 크다.**
+1. Redis Stream은 Kafka처럼 broker가 partition assignment를 관리하지 않으므로, 애플리케이션 레벨에서 shard ownership을 정해야 한다.
+2. 중앙 Group Coordinator를 직접 구현하면 leader election, stale leader fencing, assignment plan 전파, partial rebalance 복구까지 책임져야 하므로 유지보수 비용이 크다.
 3. **본 설계는 중앙 Coordinator를 두지 않고, 모든 instance가 같은 synchronized consumer view로 shard owner를 deterministic하게 계산한다.**
 4. **shard owner 계산은 Rendezvous Hashing을 기본으로 사용해 scale in/out 시 전체 shard를 재분배하지 않고 변경된 instance와 관련된 shard만 이동시킨다.**
 5. **consumer들은 `metadataVersion`, `assignmentConfigVersion`, `membershipEpoch`, 정렬된 active instance 목록을 기준으로 같은 view를 공유해야 한다.**
@@ -521,7 +521,185 @@ handoff timeout:
 * 새 owner는 lease TTL 만료 후 forced acquire 경로로 들어간다.
 * timeout 이후 남은 in-flight message는 Redis PEL recovery와 idempotency로 처리한다.
 
-### 11.4 Scale Out
+### 11.4 Consumer Join Rebalance Protocol
+
+consumer가 추가될 때의 rebalance는 별도 coordinator 명령 없이 다음 단일 프로토콜로만 수행한다.
+핵심은 "새 consumer를 active member set에 포함한다", "기존 owner가 이동 대상 shard의 read를 멈춘다", "lease TTL/CAS로 새 owner가 read 권한을 얻는다" 세 단계이다.
+
+consumer는 metadata pub/sub, shard assignment plan 저장, rebalance command 전파를 담당하지 않는다.
+consumer가 직접 관리하는 것은 자기 heartbeat, 자기 lease renew, 자기 shard worker 상태뿐이다.
+
+#### 상태
+
+instance state:
+
+```text
+STARTING -> ACTIVE -> DRAINING -> STOPPED
+STARTING -> DEGRADED
+```
+
+shard worker state:
+
+```text
+NONE -> ACQUIRING -> RECOVERING_PENDING -> READING -> RETURNING -> NONE
+```
+
+의미:
+
+* `STARTING`: metadata store와 assignment config 호환성을 확인하는 중이다. assignment candidate가 아니다.
+* `ACTIVE`: shard owner 계산 대상이다.
+* `DEGRADED`: config/version mismatch 또는 metadata 조회 실패 상태이다. assignment candidate가 아니다.
+* `DRAINING`: 종료 또는 scale-in 대상이다. assignment candidate가 아니다.
+* `ACQUIRING`: 새 view에서 자신이 owner인 shard의 lease를 얻는 중이다.
+* `RECOVERING_PENDING`: lease 획득 후 기존 pending message를 먼저 회수/처리하는 중이다.
+* `READING`: 신규 message를 `XREADGROUP ... >`로 읽을 수 있다.
+* `RETURNING`: 더 이상 owner가 아닌 shard의 신규 read를 멈추고 in-flight를 비우는 중이다.
+
+#### Join 절차
+
+새 consumer `C`가 추가되면 다음 순서만 허용한다.
+
+1. `C`는 metadata store에서 stream metadata와 canonical assignment config를 읽는다.
+2. local yaml의 assignment-affecting config가 metadata store와 다르면 `DEGRADED`로 heartbeat만 기록하고 consume하지 않는다.
+3. config가 같으면 `STARTING` heartbeat를 기록한다.
+4. `C`는 Redis consumer group과 stream shard 존재 여부를 확인한다. 필요한 `XGROUP CREATE ... MKSTREAM`은 이미 존재하면 성공으로 처리한다.
+5. 준비가 끝나면 `ACTIVE` heartbeat로 전환한다.
+6. 모든 consumer는 registry refresh 주기마다 `ACTIVE` instance 목록을 다시 읽는다.
+7. `ACTIVE` member list가 바뀌면 각 consumer는 같은 `membershipEpoch`을 계산한다.
+8. 각 consumer는 모든 shard에 대해 Rendezvous Hashing으로 `nextOwner(shard)`를 계산한다.
+9. 기존 owner는 `shardsToReturn`을 `RETURNING`으로 전환한다.
+10. 새 owner는 `shardsToAcquire`를 `ACQUIRING`으로 전환한다.
+
+#### 이동 대상 shard 판정
+
+각 consumer는 자기 관점에서만 다음 값을 계산한다.
+
+```text
+currentOwnedShards = 현재 lease를 renew 중이고 worker가 READING 또는 RETURNING인 shard
+nextOwnedShards = newView에서 owner(shard) == self인 shard
+
+shardsToKeep = currentOwnedShards ∩ nextOwnedShards
+shardsToReturn = currentOwnedShards - nextOwnedShards
+shardsToAcquire = nextOwnedShards - currentOwnedShards
+```
+
+중요한 제약:
+
+* `shardsToKeep`은 read를 계속한다.
+* `shardsToReturn`은 즉시 신규 `XREADGROUP ... >`를 중단한다.
+* `shardsToAcquire`는 lease를 얻기 전까지 절대 read하지 않는다.
+* owner 계산 결과가 같아도 lease가 없으면 read 권한이 없다.
+
+#### 반환 프로토콜
+
+기존 owner가 shard를 반환할 때는 lease를 바로 삭제하지 않는다.
+
+1. shard worker state를 `RETURNING`으로 바꾼다.
+2. 해당 shard의 block 중인 `XREADGROUP`은 block timeout 또는 interrupt로 빠져나오게 한다.
+3. 반환 시작 이후 해당 shard에 대해 `XREADGROUP ... >`를 다시 호출하지 않는다.
+4. 이미 handler에 전달된 message만 처리한다.
+5. 정상 처리된 message는 processing metadata 기록 후 `XACK`한다.
+6. 실패한 message는 retry/DLQ 정책에 맡기고 ACK하지 않는다.
+7. in-flight가 0이 되면 lease renew를 중단한다.
+8. lease value를 갱신할 수 있으면 `state=RELEASING`, `nextOwner`, `membershipEpoch`을 기록한다.
+9. lease TTL이 만료되면 새 owner가 획득할 수 있다.
+
+반환 중에는 다음을 하지 않는다.
+
+* lease key를 강제로 삭제하지 않는다.
+* pending message를 다른 owner에게 직접 넘기지 않는다.
+* 같은 shard에 worker를 하나 더 붙이지 않는다.
+
+#### 획득 프로토콜
+
+새 owner는 lease를 얻은 뒤에만 pending recovery와 신규 read를 수행한다.
+
+1. 현재 view에서 `owner(shard) == self`인지 다시 확인한다.
+2. 기존 lease가 없으면 `SET NX PX`로 lease를 획득한다.
+3. 기존 lease가 있으면 TTL 만료를 기다린다. `RELEASING`은 힌트일 뿐 소유권 양도가 아니다.
+4. lease 획득 시 value에 `instanceId`, `workerId`, `leaseToken`, `metadataVersion`, `assignmentConfigVersion`, `membershipEpoch`을 기록한다.
+5. shard worker state를 `RECOVERING_PENDING`으로 바꾼다.
+6. `XPENDING`/`XAUTOCLAIM`으로 해당 shard의 오래된 pending message를 회수한다.
+7. 회수한 pending message를 stream id 순서로 처리한다.
+8. pending recovery가 끝나면 shard worker state를 `READING`으로 바꾼다.
+9. 그 다음부터 `XREADGROUP ... >`로 신규 message를 읽는다.
+
+pending recovery 기준:
+
+* recovery idle threshold는 `lease-ttl + renew-interval`보다 크게 둔다.
+* 새 owner는 lease를 획득한 shard의 pending message만 reclaim한다.
+* pending 처리와 신규 read를 같은 shard에서 동시에 수행하지 않는다.
+
+#### 동시성 제어
+
+consumer 추가 시점에 모든 consumer가 같은 millisecond에 같은 view를 보지 못해도 된다.
+최종 read 권한은 shard lease CAS가 결정한다.
+
+필수 조건:
+
+* lease renew는 `instanceId`, `leaseToken`, `membershipEpoch`이 모두 일치할 때만 성공한다.
+* renew 시 현재 local view에서 자신이 owner가 아니면 renew하지 않는다.
+* acquire 시 현재 local view에서 자신이 owner가 아니면 시도하지 않는다.
+* view mismatch가 감지되면 해당 shard worker는 즉시 신규 read를 중단한다.
+
+이 조건을 지키면 일시적으로 shard가 비어 있을 수는 있지만, 두 consumer가 동시에 같은 shard의 신규 message를 읽는 상태는 lease CAS로 막는다.
+
+#### 실패 처리
+
+consumer join 중 실패:
+
+* `STARTING`에서 실패하면 `DEGRADED`로 남고 assignment candidate가 되지 않는다.
+* `ACTIVE` 등록 직후 죽으면 heartbeat TTL 만료 후 member list에서 빠진다.
+* 이 경우 기존 owner가 이미 반환을 시작했을 수 있으므로, 새 view에서 다시 기존 owner 또는 다른 owner가 lease를 획득한다.
+
+기존 owner 반환 중 실패:
+
+* in-flight message는 ACK되지 않았으면 PEL에 남는다.
+* lease TTL 만료 후 새 owner가 lease를 획득한다.
+* 새 owner는 pending recovery를 먼저 수행한다.
+* delivery는 at-least-once이므로 handler idempotency가 필요하다.
+
+새 owner 획득 후 실패:
+
+* lease renew가 멈추고 TTL이 만료된다.
+* 다음 owner가 pending recovery부터 다시 수행한다.
+
+#### 구현 단위
+
+MVP에서 필요한 Redis primitive는 다음으로 제한한다.
+
+* registry heartbeat: `SET key value PX ttl`
+* active registry scan: metadata store의 instance registry 조회
+* lease acquire: `SET leaseKey value NX PX ttl`
+* lease renew: Lua CAS with `instanceId + leaseToken + membershipEpoch`
+* lease release hint: Lua CAS로 `state=RELEASING` 갱신
+* pending recovery: `XPENDING`, `XAUTOCLAIM`, `XACK`
+
+별도 rebalance topic, pub/sub listener, assignment plan table은 만들지 않는다.
+
+```mermaid
+sequenceDiagram
+    participant C as New consumer
+    participant R as Registry
+    participant O as Old owner
+    participant L as Shard lease
+    participant N as New owner worker
+
+    C->>R: heartbeat STARTING
+    C->>R: heartbeat ACTIVE
+    O->>R: refresh active members
+    O->>O: compute shardsToReturn
+    O->>O: stop new XREADGROUP for moved shard
+    O->>O: drain in-flight and XACK successes
+    O->>L: stop renew / mark RELEASING
+    N->>R: refresh active members
+    N->>N: compute shardsToAcquire
+    N->>L: acquire lease after TTL/CAS
+    N->>N: recover pending first
+    N->>N: start XREADGROUP >
+```
+
+### 11.5 Scale Out
 
 새 instance가 시작되면 registry에 heartbeat를 등록한다.
 다른 instance들은 registry refresh 후 active member set에 새 instance를 포함한다.
@@ -538,7 +716,7 @@ Rendezvous Hashing 결과가 바뀐 shard만 이동 대상이 된다.
 7. 새 owner는 lease 획득 후 pending recovery를 먼저 수행한다.
 8. 새 owner는 신규 message read를 시작한다.
 
-### 11.5 Scale In
+### 11.6 Scale In
 
 instance가 정상 종료되면 먼저 `DRAINING` 상태로 바꾼다.
 
@@ -559,7 +737,7 @@ instance가 정상 종료되면 먼저 `DRAINING` 상태로 바꾼다.
 * shard lease TTL 만료 후 새 owner가 lease를 획득한다.
 * pending recovery 후 신규 read를 시작한다.
 
-### 11.6 이동량
+### 11.7 이동량
 
 Rendezvous Hashing은 instance 증감 시 전체 shard를 재분배하지 않는다.
 추가/제거된 instance와 관련된 shard만 주로 이동한다.
