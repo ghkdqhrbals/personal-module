@@ -297,7 +297,94 @@ assignment candidate 조건:
 `DRAINING` instance는 registry에는 남아 있지만 새 owner 계산에서는 제외한다.
 그래야 scale-in 때 다른 instance가 해당 shard의 새 owner로 계산될 수 있다.
 
-### 9.3 Rolling Deploy와 Config Compatibility
+### 9.3 Pod Liveness Synchronization
+
+이 모듈은 여러 Pod에 배포되는 것을 기본 전제로 한다.
+Pod들은 서로 직접 통신하지 않고, registry heartbeat를 통해 consumer liveness를 동기화한다.
+
+source of truth:
+
+* 각 Pod의 생존 여부는 registry heartbeat TTL로 판단한다.
+* 각 Pod의 consume 가능 여부는 registry state와 assignment config 호환성으로 판단한다.
+* 각 shard의 실제 read 권한은 shard lease로 판단한다.
+* Pod local memory는 cache일 뿐 source of truth가 아니다.
+
+heartbeat loop:
+
+1. Pod 시작 시 `instanceId`를 만든다.
+2. stream metadata와 canonical assignment config를 읽는다.
+3. config가 호환되면 `STARTING` heartbeat를 쓴다.
+4. Redis consumer group과 shard stream 준비가 끝나면 `ACTIVE` heartbeat를 쓴다.
+5. 이후 `heartbeat-interval`마다 같은 key를 `PX heartbeat-ttl`로 갱신한다.
+6. graceful shutdown이면 먼저 `DRAINING` heartbeat를 쓰고 shard return을 시작한다.
+7. shard return이 끝나면 heartbeat key를 삭제하거나 TTL 만료를 기다린다.
+
+liveness refresh loop:
+
+1. 각 Pod는 `membership.refresh-interval`마다 registry snapshot을 읽는다.
+2. TTL 안에 있고 assignment candidate 조건을 만족하는 instance만 candidate로 남긴다.
+3. candidate `instanceId`를 정렬해 canonical member list를 만든다.
+4. `membershipEpoch`을 계산한다.
+5. 직전 local view와 `membershipEpoch`이 다르면 rebalance를 트리거한다.
+
+구현 로직:
+
+```kotlin
+fun refreshMembership() {
+    val snapshot = registry.readInstances(consumerGroup, streamPrefix, streamVersion)
+    val candidates = snapshot
+        .filter { it.state == ACTIVE }
+        .filter { it.notExpired(now) }
+        .filter { it.metadataVersion == local.metadataVersion }
+        .filter { it.assignmentConfigVersion == local.assignmentConfigVersion }
+        .sortedBy { it.instanceId }
+
+    val nextEpoch = hash(
+        local.metadataVersion,
+        local.assignmentConfigVersion,
+        local.assignmentAlgorithm,
+        local.assignmentHashSeed,
+        candidates.map { it.instanceId }
+    )
+
+    if (nextEpoch == currentView.membershipEpoch) {
+        staleRegistrySince = null
+        return
+    }
+
+    if (!stableFor(candidates, rebalance.stabilizationWindow)) {
+        return
+    }
+
+    currentView = ConsumerView(candidates, nextEpoch)
+    reconcileShardOwnership(currentView)
+}
+```
+
+안정화 규칙:
+
+* 새 Pod는 `ACTIVE` heartbeat가 관측되기 전까지 assignment candidate가 아니다.
+* TTL이 만료된 Pod는 다음 refresh부터 assignment candidate에서 제외한다.
+* registry 조회 실패 시 기존 view를 즉시 버리지 않는다.
+* `membership.max-stale-view`를 넘도록 registry 조회가 실패하면 신규 read를 중단하고 lease renew도 중단한다.
+* 짧은 네트워크 흔들림으로 rebalance storm이 생기지 않도록 `rebalance.stabilization-window` 동안 같은 candidate set이 유지될 때만 새 view를 적용할 수 있다.
+
+동기화 보장:
+
+* 모든 Pod가 항상 같은 순간에 같은 view를 볼 필요는 없다.
+* 같은 registry snapshot을 본 Pod들은 같은 `membershipEpoch`과 같은 shard owner를 계산해야 한다.
+* view 전파는 polling 기반 eventual consistency이다.
+* 일시적인 view mismatch는 shard lease CAS로 fencing한다.
+* view mismatch 동안 일부 shard가 잠시 미할당될 수는 있지만, owner가 아닌 Pod가 신규 read를 계속하면 안 된다.
+
+Pod readiness/liveness probe 권장:
+
+* liveness probe는 process deadlock 감지용으로만 사용한다.
+* readiness probe는 metadata store, Redis, assignment config compatibility가 모두 정상일 때만 성공한다.
+* readiness 실패 Pod는 traffic serving과 stream consuming을 분리할 수 있어야 한다.
+* stream consuming을 중단해야 하는 경우 registry state를 `DRAINING` 또는 `DEGRADED`로 바꾼다.
+
+### 9.4 Rolling Deploy와 Config Compatibility
 
 rolling deploy 중에는 서로 다른 yaml 설정으로 뜬 instance가 공존할 수 있다.
 예를 들어 새 instance는 scale-out 설정을 포함하고 있지만, 기존 instance는 아직 이전 설정으로 동작할 수 있다.
@@ -434,6 +521,38 @@ MVP는 plain Rendezvous Hashing을 사용한다.
 
 ## 11. Scale In / Scale Out
 
+### 11.0 Kafka Rebalance Protocol 적용 원칙
+
+Kafka rebalance protocol에서 가져올 원칙과 버릴 원칙을 분리한다.
+
+참고한 Kafka protocol:
+
+* eager rebalance: 모든 partition을 revoke한 뒤 새 assignment를 받는다.
+* cooperative rebalance: 이동해야 하는 partition만 revoke하고, 유지되는 partition은 계속 처리한다.
+* server-side coordination: broker coordinator가 target assignment와 epoch을 관리하고 consumer는 reconcile한다.
+
+이 모듈의 선택:
+
+* eager 방식은 사용하지 않는다. consumer 하나가 추가될 때 모든 shard를 멈추면 Pod rolling deploy와 scale-out 때 전체 처리량이 떨어진다.
+* server-side coordination도 구현하지 않는다. Redis Stream에는 Kafka broker coordinator가 없고, 이를 애플리케이션에서 재구현하면 leader election과 assignment plan 전파가 필요해진다.
+* 기본 방식은 cooperative rebalance이다. 새 Pod 추가 또는 제거로 owner가 바뀌는 shard만 `RETURNING`으로 전환하고, 나머지 shard는 계속 `READING`한다.
+
+Kafka 개념과 이 모듈의 대응:
+
+```text
+Kafka consumer group member    -> runtime instance / Pod
+Kafka partition                -> stream shard
+Kafka group coordinator        -> 없음
+Kafka heartbeat                -> registry heartbeat
+Kafka generation / group epoch -> membershipEpoch
+Kafka assignment               -> deterministic Rendezvous Hashing result
+Kafka partition revocation     -> shard RETURNING
+Kafka partition assignment     -> shard ACQUIRING + lease acquire
+Kafka offset commit on revoke  -> processing metadata 기록 + XACK
+```
+
+따라서 rebalance는 "전체 정지 후 재할당"이 아니라 "local view 변경 감지 후 shard별 reconcile"로 동작한다.
+
 ### 11.1 Rebalance Trigger
 
 rebalance는 별도 coordinator가 명령하지 않는다.
@@ -523,7 +642,8 @@ handoff timeout:
 
 ### 11.4 Consumer Join Rebalance Protocol
 
-consumer가 추가될 때의 rebalance는 별도 coordinator 명령 없이 다음 단일 프로토콜로만 수행한다.
+consumer가 추가될 때의 rebalance는 Kafka cooperative rebalance처럼 이동 대상 shard만 반환하는 단일 프로토콜로 수행한다.
+별도 coordinator 명령은 없다.
 핵심은 "새 consumer를 active member set에 포함한다", "기존 owner가 이동 대상 shard의 read를 멈춘다", "lease TTL/CAS로 새 owner가 read 권한을 얻는다" 세 단계이다.
 
 consumer는 metadata pub/sub, shard assignment plan 저장, rebalance command 전파를 담당하지 않는다.
@@ -565,10 +685,23 @@ NONE -> ACQUIRING -> RECOVERING_PENDING -> READING -> RETURNING -> NONE
 4. `C`는 Redis consumer group과 stream shard 존재 여부를 확인한다. 필요한 `XGROUP CREATE ... MKSTREAM`은 이미 존재하면 성공으로 처리한다.
 5. 준비가 끝나면 `ACTIVE` heartbeat로 전환한다.
 6. 모든 consumer는 registry refresh 주기마다 `ACTIVE` instance 목록을 다시 읽는다.
-7. `ACTIVE` member list가 바뀌면 각 consumer는 같은 `membershipEpoch`을 계산한다.
-8. 각 consumer는 모든 shard에 대해 Rendezvous Hashing으로 `nextOwner(shard)`를 계산한다.
-9. 기존 owner는 `shardsToReturn`을 `RETURNING`으로 전환한다.
-10. 새 owner는 `shardsToAcquire`를 `ACQUIRING`으로 전환한다.
+7. `rebalance.stabilization-window`가 설정되어 있으면 같은 candidate set이 그 시간 동안 유지될 때까지 기다린다.
+8. `ACTIVE` member list가 바뀌면 각 consumer는 같은 `membershipEpoch`을 계산한다.
+9. 각 consumer는 모든 shard에 대해 Rendezvous Hashing으로 `nextOwner(shard)`를 계산한다.
+10. 기존 owner는 `shardsToReturn`만 `RETURNING`으로 전환한다.
+11. 기존 owner는 `shardsToKeep`을 계속 `READING`한다.
+12. 새 owner는 `shardsToAcquire`를 `ACQUIRING`으로 전환한다.
+
+이 절차는 Kafka cooperative protocol의 round를 다음처럼 단순화한 것이다.
+
+```text
+round 1: 모든 Pod가 새 member view를 관측하고, 이동 대상 shard만 RETURNING 처리한다.
+round 2: 반환된 shard lease가 만료되거나 release hint가 기록되면 새 owner가 ACQUIRING 처리한다.
+converged: 모든 shard가 새 membershipEpoch의 lease owner를 가진다.
+```
+
+round 사이에 중앙 barrier는 없다.
+각 Pod가 자기 shard 상태를 reconcile하고, lease CAS가 최종 순서를 만든다.
 
 #### 이동 대상 shard 판정
 
@@ -589,6 +722,29 @@ shardsToAcquire = nextOwnedShards - currentOwnedShards
 * `shardsToReturn`은 즉시 신규 `XREADGROUP ... >`를 중단한다.
 * `shardsToAcquire`는 lease를 얻기 전까지 절대 read하지 않는다.
 * owner 계산 결과가 같아도 lease가 없으면 read 권한이 없다.
+
+구현 로직:
+
+```kotlin
+fun reconcileShardOwnership(view: ConsumerView) {
+    val currentOwned = shardWorkers
+        .filter { it.hasLease && it.state in setOf(READING, RETURNING) }
+        .map { it.shardIndex }
+        .toSet()
+
+    val nextOwned = allShards
+        .filter { shard -> ownerOf(shard, view) == local.instanceId }
+        .toSet()
+
+    val shardsToKeep = currentOwned intersect nextOwned
+    val shardsToReturn = currentOwned - nextOwned
+    val shardsToAcquire = nextOwned - currentOwned
+
+    shardsToKeep.forEach { shardWorkers[it].continueReading() }
+    shardsToReturn.forEach { shardWorkers[it].startReturning() }
+    shardsToAcquire.forEach { startAcquireWorker(it, view) }
+}
+```
 
 #### 반환 프로토콜
 
@@ -643,6 +799,39 @@ consumer 추가 시점에 모든 consumer가 같은 millisecond에 같은 view�
 * view mismatch가 감지되면 해당 shard worker는 즉시 신규 read를 중단한다.
 
 이 조건을 지키면 일시적으로 shard가 비어 있을 수는 있지만, 두 consumer가 동시에 같은 shard의 신규 message를 읽는 상태는 lease CAS로 막는다.
+
+#### Pod Liveness와 Rebalance 관계
+
+Pod liveness 변화는 rebalance의 입력일 뿐이다.
+Pod가 다른 Pod에게 직접 shard 반환을 명령하지 않는다.
+
+scale-out:
+
+* 새 Pod가 `ACTIVE` heartbeat를 쓰면 다음 registry refresh에서 member list에 포함된다.
+* member list가 바뀌면 모든 Pod가 새 `membershipEpoch`을 계산한다.
+* 기존 owner는 새 Pod로 이동해야 하는 shard만 `RETURNING` 처리한다.
+* 새 Pod는 자신이 owner로 계산한 shard만 `ACQUIRING` 처리한다.
+
+scale-in:
+
+* 종료 대상 Pod는 먼저 `DRAINING` heartbeat를 쓴다.
+* `DRAINING` Pod는 assignment candidate에서 빠진다.
+* 남은 Pod들은 새 `membershipEpoch`에서 owner가 된 shard만 획득한다.
+* 종료 대상 Pod는 자신이 가진 shard를 `RETURNING` 처리한다.
+
+비정상 종료:
+
+* heartbeat TTL 만료 전까지는 기존 Pod가 살아 있을 수 있다고 본다.
+* TTL 만료 후 member list에서 빠지고 새 `membershipEpoch`이 계산된다.
+* shard lease TTL 만료 후 새 owner가 lease를 획득한다.
+* 새 owner는 pending recovery를 먼저 수행한다.
+
+registry 지연:
+
+* 어떤 Pod는 새 member list를 먼저 보고, 어떤 Pod는 이전 member list를 볼 수 있다.
+* 이전 view의 owner가 lease renew를 계속하더라도 새 owner는 lease를 얻지 못하므로 신규 read 중복은 발생하지 않는다.
+* 이전 owner가 새 view를 보게 되면 owner mismatch로 renew를 중단한다.
+* registry 조회 실패가 `membership.max-stale-view`를 넘으면 해당 Pod는 신규 read와 lease renew를 중단한다.
 
 #### 실패 처리
 
@@ -993,6 +1182,14 @@ redis-stream:
     heartbeat-interval: 5s
     heartbeat-ttl: 15s
     refresh-interval: 5s
+    max-stale-view: 20s
+
+  rebalance:
+    protocol: COOPERATIVE
+    stabilization-window: 3s
+    acquire-backoff-min: 100ms
+    acquire-backoff-max: 1s
+    handoff-timeout: 30s
 
   assignment:
     strategy: RENDEZVOUS_HASH
@@ -1140,3 +1337,9 @@ MVP와 production baseline은 Coordinatorless 설계를 선택한다.
 * Redis Cluster resharding 자동 대응
 * hot shard 자동 split
 * bounded-load rendezvous hashing
+
+---
+
+## 21. References
+
+* NashTech Blog, [Apache Kafka Rebalancing Series: Understanding Kafka Rebalancing Protocols](https://blog.nashtechglobal.com/apache-kafka-rebalancing-series-understanding-kafka-rebalancing-protocols/)
