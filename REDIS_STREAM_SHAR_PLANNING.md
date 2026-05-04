@@ -4,7 +4,7 @@
 
 1. **본 설계는 중앙 Coordinator를 두지 않고, 모든 instance가 같은 consumer view를 독립적으로 계산해 shard owner를 결정한다.**
 2. **Rendezvous Hashing은 consumer들이 같은 시각에 동시에 동기화되어야 하는 방식이 아니라, 같은 active member snapshot을 본 consumer들이 같은 owner를 계산하는 deterministic algorithm이다.**
-3. **consumer별 registry refresh 시점이 달라 snapshot이 일시적으로 어긋날 수 있으므로, 실제 read 권한은 shard lease CAS로 fencing하고 짧은 미할당을 허용한다.**
+3. **consumer는 자기 snapshot이 다른 consumer와 어긋났는지 직접 알 수 없으므로, 실제 read 권한은 자기 local view와 shard lease CAS 검증 결과로만 판단한다.**
 4. **consumer들은 `metadataVersion`, `assignmentConfigVersion`, `membershipEpoch`, 정렬된 active instance 목록을 기준으로 같은 view를 만들어야 한다.**
 5. **rolling deploy 중 서로 다른 yaml/config를 가진 instance가 공존할 수 있으므로, shard owner 계산에 영향을 주는 설정은 `assignment_config_version`으로 관리한다.**
 6. **`assignment_config_version`이 맞지 않는 instance는 `DEGRADED`로 등록하고 assignment candidate에서 제외한다.**
@@ -375,8 +375,9 @@ fun refreshMembership() {
 * 모든 Pod가 항상 같은 순간에 같은 view를 볼 필요는 없다.
 * 같은 registry snapshot을 본 Pod들은 같은 `membershipEpoch`과 같은 shard owner를 계산해야 한다.
 * view 전파는 polling 기반 eventual consistency이다.
-* 일시적인 view mismatch는 shard lease CAS로 fencing한다.
-* view mismatch 동안 일부 shard가 잠시 미할당될 수는 있지만, owner가 아닌 Pod가 신규 read를 계속하면 안 된다.
+* 각 Pod는 다른 Pod와의 view mismatch를 직접 알 수 없다.
+* 실제로 view가 달라진 기간의 중복 read는 shard lease CAS로 fencing한다.
+* view가 달라진 기간에는 일부 shard가 잠시 미할당될 수는 있지만, 자기 local view에서 owner가 아니거나 lease가 없는 Pod가 신규 read를 계속하면 안 된다.
 
 Pod readiness/liveness probe 권장:
 
@@ -498,6 +499,7 @@ owner(shardIndex) =
 
 * 모든 instance가 같은 active member snapshot을 보면 같은 owner를 계산한다.
 * 모든 instance가 동시에 같은 snapshot을 볼 필요는 없다.
+* 각 instance는 자기 local snapshot이 최신인지, 다른 instance와 다른지 직접 알 수 없다.
 * snapshot 전파 지연 중에는 이전 owner가 lease를 유지하거나, 새 owner가 lease 획득에 실패하거나, 일부 shard가 잠시 미할당될 수 있다.
 * instance가 추가되면 일부 shard만 새 instance로 이동한다.
 * instance가 제거되면 제거된 instance의 shard만 남은 instance로 이동한다.
@@ -510,16 +512,18 @@ MVP는 plain Rendezvous Hashing을 사용한다.
 ### 10.4 Snapshot Consistency
 
 모든 instance가 항상 완전히 같은 시점의 member snapshot을 볼 수는 없다.
-Rendezvous Hashing은 동일 입력에 대해 동일 출력을 만드는 알고리즘이지, consumer 간 동시 동기화를 제공하는 프로토콜은 아니다.
+또한 개별 instance는 자기 snapshot이 다른 instance의 snapshot과 다른지 직접 알 수 없다.
+Rendezvous Hashing은 동일 입력에 대해 동일 출력을 만드는 알고리즘이지, consumer 간 동시 동기화나 불일치 감지를 제공하는 프로토콜은 아니다.
 그래서 assignment 계산 결과만으로 read 권한을 주지 않는다.
 
 정책:
 
 * instance는 자신이 owner라고 계산한 shard에 대해서만 shard lease 획득을 시도한다.
 * shard lease를 얻은 instance만 `XREADGROUP`을 수행한다.
-* member snapshot이 잠시 달라도 lease CAS가 최종 fencing 역할을 한다.
-* snapshot 불일치 동안에는 중복 read 대신 일부 shard가 잠시 미할당될 수 있다.
-* 이전 snapshot을 보는 owner는 새 snapshot을 보기 전까지 lease renew를 계속할 수 있다.
+* instance는 snapshot 불일치 여부를 판단하지 않고, lease acquire/renew CAS 성공 여부만 판단한다.
+* lease acquire/renew CAS가 최종 fencing 역할을 한다.
+* snapshot이 실제로 달라진 기간에는 중복 read 대신 일부 shard가 잠시 미할당될 수 있다.
+* 이전 snapshot을 보는 owner는 자신의 local view 기준으로 owner이면 lease renew를 계속할 수 있다.
 * 새 snapshot을 먼저 본 next owner는 기존 lease가 만료되거나 기존 owner가 renew를 중단할 때까지 read하지 못한다.
 * 미할당 시간은 heartbeat TTL, lease TTL, scan interval로 제한한다.
 
@@ -609,7 +613,7 @@ Kafka offset commit on revoke  -> processing metadata 기록 + XACK
 ### 11.1 Rebalance Trigger
 
 rebalance는 별도 coordinator가 명령하지 않는다.
-각 instance가 synchronized consumer view 변화를 감지하면 shard owner를 다시 계산한다.
+각 instance가 자기 local synchronized consumer view 변화를 관측하면 shard owner를 다시 계산한다.
 
 trigger:
 
@@ -684,7 +688,7 @@ forced return:
 4. lease 획득 시 `leaseToken`, `metadataVersion`, `membershipEpoch`을 기록한다.
 5. pending recovery를 먼저 수행한다.
 6. recovery가 끝나면 `XREADGROUP ... >`로 신규 message read를 시작한다.
-7. read loop 중 lease renew 실패 또는 view mismatch가 발생하면 즉시 read를 중단한다.
+7. read loop 중 lease renew 실패, local view 변경, local view 기준 owner mismatch가 발생하면 즉시 read를 중단한다.
 
 acquire backoff:
 
@@ -873,7 +877,9 @@ consumer 추가 시점에 모든 consumer가 같은 millisecond에 같은 view�
 * lease renew는 `instanceId`, `leaseToken`, `membershipEpoch`이 모두 일치할 때만 성공한다.
 * renew 시 현재 local view에서 자신이 owner가 아니면 renew하지 않는다.
 * acquire 시 현재 local view에서 자신이 owner가 아니면 시도하지 않는다.
-* view mismatch가 감지되면 해당 shard worker는 즉시 신규 read를 중단한다.
+* consumer는 다른 consumer와의 view mismatch를 감지하지 못한다.
+* consumer가 감지할 수 있는 것은 local view 변경, 자기 lease CAS 실패, local view 기준 owner mismatch뿐이다.
+* 이 중 하나가 발생하면 해당 shard worker는 즉시 신규 read를 중단한다.
 
 이 조건을 지키면 일시적으로 shard가 비어 있을 수는 있지만, 두 consumer가 동시에 같은 shard의 신규 message를 읽는 상태는 lease CAS로 막는다.
 
