@@ -2,7 +2,7 @@
 
 ## 0. 고려사항 요약
 
-1. Redis Stream은 Kafka처럼 broker가 partition assignment를 관리하지 않으므로, 애플리케이션 레벨에서 shard ownership을 정해야 한다.
+1. **Redis Stream은 Kafka처럼 broker가 partition assignment를 관리하지 않으므로, 애플리케이션 레벨에서 shard ownership을 정해야 한다.**
 2. **중앙 Group Coordinator를 직접 구현하면 leader election, stale leader fencing, assignment plan 전파, partial rebalance 복구까지 책임져야 하므로 유지보수 비용이 크다.**
 3. **본 설계는 중앙 Coordinator를 두지 않고, 모든 instance가 같은 synchronized consumer view로 shard owner를 deterministic하게 계산한다.**
 4. **shard owner 계산은 Rendezvous Hashing을 기본으로 사용해 scale in/out 시 전체 shard를 재분배하지 않고 변경된 instance와 관련된 shard만 이동시킨다.**
@@ -15,9 +15,9 @@
 11. **graceful handoff가 timeout 안에 끝나지 않으면 lease TTL 만료 후 forced acquire로 전환하고, PEL recovery와 idempotency로 복구한다.**
 12. **shard 단위 순서를 보장하기 위해 하나의 shard는 하나의 worker만 읽고, 같은 shard의 handler를 병렬 실행하지 않는다.**
 13. **pending recovery도 shard owner의 단일 worker만 수행하며, pending message를 먼저 처리한 뒤 신규 message read를 재개한다.**
-14. consumer delivery는 `XREADGROUP` 후 정상 처리 완료 시 `XACK`하는 at-least-once 방식만 사용한다. `NOACK`은 사용하지 않는다.
-15. producer retry로 인한 중복 stream entry는 Redis 8.6+ `XADD IDMP {producerName} {idempotencyKey}`로 방지한다.
-16. `IDMPAUTO`는 사용하지 않고, producer가 business event 단위 idempotency key를 직접 생성하고 retry 시 같은 key를 재사용한다.
+14. **consumer delivery는 `XREADGROUP` 후 정상 처리 완료 시 `XACK`하는 at-least-once 방식만 사용한다. `NOACK`은 사용하지 않는다.**
+15. **producer retry로 인한 중복 stream entry는 Redis 8.6+ `XADD IDMP {producerName} {idempotencyKey}`로 방지한다.**
+16. **`IDMPAUTO`는 사용하지 않고, producer가 business event 단위 idempotency key를 직접 생성하고 retry 시 같은 key를 재사용한다.**
 17. **producer, consumer, assignment 계산은 모두 metadata store의 stream metadata를 기준으로 하며, hot path에서는 immutable snapshot cache를 사용한다.**
 18. **shard count, partition key schema, partition hash algorithm, assignment algorithm은 같은 stream version 안에서 불변이다.**
 19. **shard count나 hash/assignment algorithm을 바꿔야 하면 새 stream version을 만들고 dual-read/write 및 backlog drain 절차로 전환한다.**
