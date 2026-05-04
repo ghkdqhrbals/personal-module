@@ -522,10 +522,13 @@ Rendezvous Hashing은 동일 입력에 대해 동일 출력을 만드는 알고�
 * shard lease를 얻은 instance만 `XREADGROUP`을 수행한다.
 * instance는 snapshot 불일치 여부를 판단하지 않고, lease acquire/renew CAS 성공 여부만 판단한다.
 * lease acquire/renew CAS가 최종 fencing 역할을 한다.
-* snapshot이 실제로 달라진 기간에는 중복 read 대신 일부 shard가 잠시 미할당될 수 있다.
+* snapshot이 실제로 달라진 기간에도 shard별 lease key가 하나라면 새 owner는 기존 owner가 lease를 놓기 전까지 같은 shard를 읽지 못한다.
+* 따라서 올바른 lease 구현에서는 snapshot drift가 곧바로 중복 read를 만들지 않고, stale owner가 shard를 계속 점유해 rebalance가 수렴하지 않는 문제가 먼저 발생한다.
+* 중복 read는 old owner가 lease를 잃었는데도 read loop가 이를 모르고 계속 `XREADGROUP`을 호출할 때 발생한다.
 * 이전 snapshot을 보는 owner는 자신의 local view 기준으로 owner이면 lease renew를 계속할 수 있다.
 * 새 snapshot을 먼저 본 next owner는 기존 lease가 만료되거나 기존 owner가 renew를 중단할 때까지 read하지 못한다.
-* 미할당 시간은 heartbeat TTL, lease TTL, scan interval로 제한한다.
+* stale owner가 영구 점유하지 않도록 lease renew는 registry refresh 성공과 `membership.max-stale-view` 조건을 통과할 때만 허용한다.
+* 미할당 또는 잘못된 owner 점유 시간은 heartbeat TTL, lease TTL, scan interval, max stale view로 제한한다.
 
 ### 10.5 Declarative Target Assignment
 
@@ -881,7 +884,10 @@ consumer 추가 시점에 모든 consumer가 같은 millisecond에 같은 view�
 * consumer가 감지할 수 있는 것은 local view 변경, 자기 lease CAS 실패, local view 기준 owner mismatch뿐이다.
 * 이 중 하나가 발생하면 해당 shard worker는 즉시 신규 read를 중단한다.
 
-이 조건을 지키면 일시적으로 shard가 비어 있을 수는 있지만, 두 consumer가 동시에 같은 shard의 신규 message를 읽는 상태는 lease CAS로 막는다.
+이 조건을 지키면 snapshot drift 상황에서도 두 consumer가 동시에 같은 shard의 신규 message를 읽는 상태는 lease CAS로 막는다.
+대신 stale owner가 lease를 계속 갱신하면 새 owner는 shard를 가져오지 못하므로 rebalance convergence가 지연된다.
+반대로 old owner가 lease를 잃었는데도 read loop가 lease token을 재검증하지 않으면 그때 중복 read가 발생할 수 있다.
+따라서 read loop는 `lease acquired -> XREADGROUP -> handler before execute -> ACK before commit` 경계마다 lease token을 재검증해야 한다.
 
 #### Pod Liveness와 Rebalance 관계
 
@@ -1069,7 +1075,12 @@ lease value:
 * renew는 owner와 token이 일치할 때만 Lua로 갱신한다.
 * owner가 아니면 갱신하지 않는다.
 * renew 시 `metadataVersion`, `assignmentConfigVersion`, `membershipEpoch`, `memberEpoch`이 현재 local view와 같아야 한다.
+* renew 전에는 registry refresh가 `membership.max-stale-view` 안에 성공했는지 확인한다.
+* registry refresh가 오래 실패하면 local view가 맞는지 판단할 수 없으므로 lease renew를 중단한다.
 * lease 갱신 실패 시 해당 shard의 신규 read를 즉시 중단한다.
+* `XREADGROUP` 호출 직전에는 반드시 local worker가 유효 lease token을 보유하고 있고, 현재 시간이 `leaseValidUntil - read-safety-margin`보다 이전인지 확인한다.
+* `XREADGROUP BLOCK` 시간은 lease renew 실패를 빠르게 반영할 수 있도록 `lease-ttl`보다 충분히 짧아야 한다.
+* block 중 lease를 잃을 수 있으므로 handler 실행 전에도 lease token 유효성을 다시 확인한다.
 * graceful return 중에는 lease state를 `RELEASING`으로 바꿀 수 있다.
 * `RELEASING`은 새 owner에게 lease TTL 만료가 가까워졌다는 신호를 주기 위한 hint이다.
 * lease token과 TTL이 최종 권한 기준이며, release marker만으로 소유권을 넘기지 않는다.
