@@ -2,24 +2,24 @@
 
 ## 0. 고려사항 요약
 
-1. **본 설계는 중앙 Coordinator를 두지 않고, 모든 instance가 같은 consumer view를 독립적으로 계산해 shard owner를 결정한다.**
-2. **Rendezvous Hashing은 consumer들이 같은 시각에 동시에 동기화되어야 하는 방식이 아니라, 같은 active member snapshot을 본 consumer들이 같은 owner를 계산하는 deterministic algorithm이다.**
-3. **consumer는 자기 snapshot이 다른 consumer와 어긋났는지 직접 알 수 없으므로, 실제 read 권한은 자기 local view와 shard lease CAS 검증 결과로만 판단한다.**
-4. **consumer들은 `metadataVersion`, `assignmentConfigVersion`, `membershipEpoch`, 정렬된 active instance 목록을 기준으로 같은 view를 만들어야 한다.**
-5. **rolling deploy 중 서로 다른 yaml/config를 가진 instance가 공존할 수 있으므로, shard owner 계산에 영향을 주는 설정은 `assignment_config_version`으로 관리한다.**
-6. **`assignment_config_version`이 맞지 않는 instance는 `DEGRADED`로 등록하고 assignment candidate에서 제외한다.**
-7. **`active-threads`, batch size, block timeout 같은 local-only 설정은 instance마다 달라도 shard owner 계산에 영향을 주면 안 된다.**
-8. **scale in/out 시 shard 반환은 신규 read 중단, in-flight 처리 완료, lease renew 중단, 새 owner acquire 순서로 진행한다.**
-9. **graceful handoff가 timeout 안에 끝나지 않으면 lease TTL 만료 후 forced acquire로 전환하고, PEL recovery와 idempotency로 복구한다.**
-10. **정상 처리 경로에서는 shard 단위 순서를 보장하기 위해 하나의 shard는 하나의 worker만 읽고, 같은 shard의 handler를 병렬 실행하지 않는다.**
-11. **owner 전환 중 ACK 되지 않은 pending message는 Redis PEL의 `min-idle-time`이 지나야 안전하게 reclaim할 수 있으므로, strict ordering과 빠른 failover는 동시에 만족하기 어렵다.**
-12. **pending recovery도 shard owner의 단일 worker만 수행하며, pending message를 먼저 처리한 뒤 신규 message read를 재개한다.**
-13. **consumer delivery는 `XREADGROUP` 후 정상 처리 완료 시 `XACK`하는 at-least-once 방식만 사용한다. `NOACK`은 사용하지 않는다.**
-14. **producer retry로 인한 중복 stream entry는 Redis 8.6+ `XADD IDMP {producerName} {idempotencyKey}`로 방지한다.**
-15. **`IDMPAUTO`는 사용하지 않고, producer가 business event 단위 idempotency key를 직접 생성하고 retry 시 같은 key를 재사용한다.**
-16. **producer, consumer, assignment 계산은 모두 metadata store의 stream metadata를 기준으로 하며, hot path에서는 immutable snapshot cache를 사용한다.**
-17. **shard count, partition key schema, partition hash algorithm, assignment algorithm은 같은 stream version 안에서 불변이다.**
-18. **shard count나 hash/assignment algorithm을 바꿔야 하면 새 stream version을 만들고 dual-read/write 및 backlog drain 절차로 전환한다.**
+1. **서비스는 다운타임 없이 계속 동작해야 하며, lag/backlog가 0이 될 때까지 기다린 뒤 shard scale out/in을 수행하는 방식은 허용하지 않는다.**
+2. **본 설계는 중앙 Coordinator를 두지 않고, 모든 instance가 같은 consumer view를 독립적으로 계산해 shard owner를 결정한다.**
+3. **Rendezvous Hashing은 consumer들이 같은 시각에 동시에 동기화되어야 하는 방식이 아니라, 같은 active member snapshot을 본 consumer들이 같은 owner를 계산하는 deterministic algorithm이다.**
+4. **consumer는 자기 snapshot이 다른 consumer와 어긋났는지 직접 알 수 없으므로, 실제 read 권한은 자기 local view와 shard lease CAS 검증 결과로만 판단한다.**
+5. **consumer들은 `metadataVersion`, `assignmentConfigVersion`, `membershipEpoch`, 정렬된 active instance 목록을 기준으로 같은 view를 만들어야 한다.**
+6. **rolling deploy 중 서로 다른 yaml/config를 가진 instance가 공존할 수 있으므로, shard owner 계산에 영향을 주는 설정은 `assignment_config_version`으로 관리한다.**
+7. **`assignment_config_version`이 맞지 않는 instance는 `DEGRADED`로 등록하고 assignment candidate에서 제외한다.**
+8. **`active-threads`, batch size, block timeout 같은 local-only 설정은 instance마다 달라도 shard owner 계산에 영향을 주면 안 된다.**
+9. **scale in/out 시 shard 반환은 신규 read 중단, in-flight 처리 완료, lease renew 중단, 새 owner acquire 순서로 진행한다.**
+10. **graceful handoff가 timeout 안에 끝나지 않으면 lease TTL 만료 후 forced acquire로 전환하고, PEL recovery와 idempotency로 복구한다.**
+11. **정상 처리 경로에서는 shard 단위 순서를 보장하기 위해 하나의 shard는 하나의 worker만 읽고, 같은 shard의 handler를 병렬 실행하지 않는다.**
+12. **owner 전환 중 ACK 되지 않은 pending message는 Redis PEL의 `min-idle-time`이 지나야 안전하게 reclaim할 수 있으므로, strict ordering과 빠른 failover는 동시에 만족하기 어렵다.**
+13. **pending recovery도 shard owner의 단일 worker만 수행하며, pending message를 먼저 처리한 뒤 신규 message read를 재개한다.**
+14. **consumer delivery는 `XREADGROUP` 후 정상 처리 완료 시 `XACK`하는 at-least-once 방식만 사용한다. `NOACK`은 사용하지 않는다.**
+15. **producer retry로 인한 중복 stream entry는 Redis 8.6+ `XADD IDMP {producerName} {idempotencyKey}`로 방지한다.**
+16. **`IDMPAUTO`는 사용하지 않고, producer가 business event 단위 idempotency key를 직접 생성하고 retry 시 같은 key를 재사용한다.**
+17. **producer, consumer, assignment 계산은 모두 metadata store의 stream metadata를 기준으로 하며, hot path에서는 immutable snapshot cache를 사용한다.**
+18. **shard count 변경은 단순 modulo 변경이 아니라 online shard migration 문제로 다루며, 기존/신규 routing이 공존하는 동안에도 produce/consume이 계속되어야 한다.**
 19. **metadata store에는 stream metadata, runtime instance registry, processing state, idempotency key, retry/DLQ 기록과 retention 정책이 필요하다.**
 
 ---
@@ -48,6 +48,8 @@ Redis Stream은 Kafka처럼 broker가 partition assignment와 rebalance를 관�
 
 * 정상 처리 경로에서 shard 단위 순서 보장
 * scale-in/out 시 자동 shard 재분배
+* shard scale out/in 시 서비스 다운타임 없이 produce/consume 지속
+* shard scale out/in 시 lag/backlog 0 대기 없이 online migration 수행
 * 별도 coordinator leader election 제거
 * producer와 consumer가 같은 partitioning metadata를 사용
 * rolling deploy 중 서로 다른 설정을 가진 instance가 공존해도 안전하게 동작
@@ -62,7 +64,8 @@ Redis Stream은 Kafka처럼 broker가 partition assignment와 rebalance를 관�
 * global ordering
 * Kafka 수준의 broker-managed consumer group 구현
 * shard owner 장애/전환 중에도 지연 없이 유지되는 strict ordering
-* 동적 shard-count 변경
+* 같은 routing epoch 안에서 단순 shard-count 변경
+* 전체 backlog drain을 전제로 한 stop-the-world shard migration
 * Redis Cluster resharding 자동 대응
 * hot shard 자동 split
 * 외부 side effect까지 포함한 절대적 exactly-once
@@ -113,6 +116,7 @@ producer, consumer, assignment 계산은 모두 metadata store의 stream metadat
 stream_metadata
   stream_prefix
   stream_version
+  routing_epoch
   shard_count
   partition_key_schema
   partition_hash_algorithm
@@ -136,15 +140,15 @@ stream_metadata
 * `assignment_hash_seed`
 
 위 값이 바뀌면 같은 partition key가 다른 shard 또는 다른 owner로 계산될 수 있다.
-따라서 같은 `stream_prefix + stream_version` 안에서는 바꾸지 않는다.
-변경이 필요하면 새 `stream_version`을 만든다.
+따라서 같은 `stream_prefix + stream_version + routing_epoch` 안에서는 바꾸지 않는다.
+변경이 필요하면 새 `stream_version` 또는 새 `routing_epoch`을 만들고 online migration으로 전환한다.
 
 metadata 조회 정책:
 
 * producer/consumer는 hot path에서 metadata store를 매번 조회하지 않는다.
 * 시작 시 metadata를 로드하고 local immutable snapshot으로 캐시한다.
 * `metadata_version` 변경 event 또는 refresh interval로 새 snapshot을 가져온다.
-* message의 `streamVersion`, `metadataVersion` 기준으로 해당 버전의 metadata를 검증한다.
+* message의 `streamVersion`, `routingEpoch`, `metadataVersion` 기준으로 해당 버전의 metadata를 검증한다.
 * active version만 기준으로 검증하면 v1/v2 dual-read 전환 중 정상 backlog를 오탐할 수 있다.
 
 ---
@@ -152,7 +156,7 @@ metadata 조회 정책:
 ## 6. Producer Routing
 
 ```text
-metadata = metadataCache.get(streamPrefix, streamVersion)
+metadata = metadataCache.get(streamPrefix, streamVersion, routingEpoch)
 partitionKey = partitionKeyExtractor(message, metadata.partitionKeySchema)
 shardIndex = hash(metadata.partitionHashAlgorithm, metadata.partitionHashSeed, partitionKey) % metadata.shardCount
 streamKey = format(metadata.streamKeyFormat, streamPrefix, streamVersion, shardIndex)
@@ -171,6 +175,7 @@ message에는 routing metadata를 넣는다.
   "partitionKey": "user-123",
   "streamPrefix": "notification",
   "streamVersion": "v1",
+  "routingEpoch": 1,
   "shardIndex": 2,
   "partitionHashAlgorithm": "murmur3",
   "partitionHashSeed": "default",
@@ -1251,9 +1256,19 @@ retention:
 
 ---
 
-## 16. Version Migration
+## 16. Online Shard Migration
 
-`shard_count`, partition hash algorithm, assignment algorithm을 바꾸려면 새 stream version을 만든다.
+`shard_count`, partition hash algorithm, assignment algorithm을 바꾸는 작업은 stop-the-world migration으로 처리하지 않는다.
+서비스는 produce/consume을 계속해야 하며, lag/backlog가 0이 될 때까지 기다리는 절차를 scale out/in의 필수 조건으로 두지 않는다.
+
+기본 원칙:
+
+* 같은 routing epoch 안에서 `hash(partitionKey) % shardCount`의 `shardCount`만 바꾸지 않는다.
+* shard scale out/in은 새 stream version 또는 새 routing epoch을 만들고, 기존 routing과 신규 routing이 공존하는 online migration으로 처리한다.
+* producer는 metadata store의 active routing rule을 보고 message 단위로 routing version을 기록한다.
+* consumer는 message에 기록된 `streamVersion`, `routingEpoch`, `metadataVersion`을 기준으로 처리한다.
+* consumer는 active version만 읽지 않고, migration 중인 source/target version을 함께 읽을 수 있어야 한다.
+* migration 완료 조건은 전체 lag 0 대기가 아니라, routing cutover와 안전한 retention window 기준으로 판단한다.
 
 예:
 
@@ -1262,18 +1277,35 @@ notification:v1:0 ~ notification:v1:5
 notification:v2:0 ~ notification:v2:11
 ```
 
-전환 절차:
+금지되는 절차:
+
+```text
+1. producer write 중단
+2. v1 backlog가 0이 될 때까지 대기
+3. shard count 변경
+4. producer write 재개
+```
+
+이 방식은 다운타임 또는 처리 지연을 전제로 하므로 본 설계의 전제조건에 맞지 않는다.
+
+online 전환 절차:
 
 1. v2 stream metadata를 생성한다.
 2. v2 stream과 consumer group을 생성한다.
-3. producer dual-write 또는 v2 write 전환을 배포한다.
-4. consumer가 v1/v2를 함께 읽도록 배포한다.
-5. v1 backlog를 drain한다.
-6. v2만 사용한다.
-7. rollback window 이후 v1을 deprecated 처리한다.
+3. consumer가 v1/v2를 함께 읽을 수 있도록 먼저 배포한다.
+4. producer가 metadata store의 routing rule을 refresh해 신규 write부터 v2 routing을 사용할 수 있게 한다.
+5. cutover 이후 신규 message는 v2에 기록하되, 기존 v1 message 처리는 계속 진행한다.
+6. v1은 신규 write 대상에서 제외하지만, retention window 동안 consumer read 대상에는 남긴다.
+7. v1 lag, pending, DLQ를 관측해 운영자가 안전하다고 판단하면 deprecated 처리한다.
 
-consumer는 message의 `streamVersion`과 `metadataVersion`으로 해당 metadata snapshot을 조회한다.
+consumer는 message의 `streamVersion`, `routingEpoch`, `metadataVersion`으로 해당 metadata snapshot을 조회한다.
 active stream version만 기준으로 검증하지 않는다.
+
+주의:
+
+* 이 방식은 신규 write 다운타임을 없애지만, 같은 partition key의 v1/v2 메시지가 동시에 남을 수 있다.
+* strict key ordering이 필요한 경우에는 key 단위 cutover fence, routing registry, 또는 key별 migration state가 추가로 필요하다.
+* 이 추가 설계 없이는 shard scale out/in 중 key 단위 strict ordering을 보장한다고 말하면 안 된다.
 
 ---
 
@@ -1441,6 +1473,7 @@ MVP와 production baseline은 Coordinatorless 설계를 선택한다.
 
 * stream metadata 관리
 * producer shard routing
+* online shard scale out/in을 위한 stream version 또는 routing epoch metadata
 * XADD IDMP producer idempotency
 * consumer group initialization
 * runtime instance registry
@@ -1459,7 +1492,8 @@ MVP와 production baseline은 Coordinatorless 설계를 선택한다.
 * 중앙 Group Coordinator
 * leader election
 * global ordering
-* 동적 shard-count 변경
+* 같은 routing epoch 안에서 shard count만 바꾸는 in-place resharding
+* lag/backlog 0 대기를 전제로 하는 stop-the-world shard migration
 * Redis Cluster resharding 자동 대응
 * hot shard 자동 split
 * bounded-load rendezvous hashing
