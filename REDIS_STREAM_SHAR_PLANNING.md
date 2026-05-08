@@ -12,9 +12,9 @@
 8. **`active-threads`, batch size, block timeout 같은 local-only 설정은 instance마다 달라도 shard owner 계산에 영향을 주면 안 된다.**
 9. **scale in/out 시 shard 반환은 신규 read 중단, in-flight 처리 완료, lease renew 중단, 새 owner acquire 순서로 진행한다.**
 10. **graceful handoff가 timeout 안에 끝나지 않으면 lease TTL 만료 후 forced acquire로 전환하고, PEL recovery와 idempotency로 복구한다.**
-11. **정상 처리 경로에서는 shard 단위 순서를 보장하기 위해 하나의 shard는 하나의 worker만 읽고, 같은 shard의 handler를 병렬 실행하지 않는다.**
+11. **정상 처리 경로의 순서 보장 단위는 shard 전체가 아니라 `orderingKey`이다. 같은 shard 안에서도 서로 다른 key는 병렬 처리할 수 있지만, 같은 key의 message는 stream id 순서대로 하나씩 처리한다.**
 12. **owner 전환 중 ACK 되지 않은 pending message는 Redis PEL의 `min-idle-time`이 지나야 안전하게 reclaim할 수 있으므로, strict ordering과 빠른 failover는 동시에 만족하기 어렵다.**
-13. **pending recovery도 shard owner의 단일 worker만 수행하며, pending message를 먼저 처리한 뒤 신규 message read를 재개한다.**
+13. **pending recovery는 shard owner만 수행하며, recovery 대상 message를 `orderingKey`별 lane에 먼저 복원한 뒤 같은 key의 신규 message를 처리한다.**
 14. **consumer delivery는 `XREADGROUP` 후 정상 처리 완료 시 `XACK`하는 at-least-once 방식만 사용한다. `NOACK`은 사용하지 않는다.**
 15. **producer retry로 인한 중복 stream entry는 Redis 8.6+ `XADD IDMP {producerName} {idempotencyKey}`로 방지한다.**
 16. **`IDMPAUTO`는 사용하지 않고, producer가 business event 단위 idempotency key를 직접 생성하고 retry 시 같은 key를 재사용한다.**
@@ -46,10 +46,11 @@ Redis Stream은 Kafka처럼 broker가 partition assignment와 rebalance를 관�
 
 ## 2. Goals
 
-* 정상 처리 경로에서 shard 단위 순서 보장
+* 정상 처리 경로에서 key 단위 순서 보장
 * scale-in/out 시 자동 shard 재분배
 * shard scale out/in 시 서비스 다운타임 없이 produce/consume 지속
 * shard scale out/in 시 lag/backlog 0 대기 없이 online migration 수행
+* shard count 변경 중에도 같은 ordering key의 순서 보장을 유지
 * 별도 coordinator leader election 제거
 * producer와 consumer가 같은 partitioning metadata를 사용
 * rolling deploy 중 서로 다른 설정을 가진 instance가 공존해도 안전하게 동작
@@ -62,6 +63,7 @@ Redis Stream은 Kafka처럼 broker가 partition assignment와 rebalance를 관�
 ## 3. Non-Goals
 
 * global ordering
+* shard 전체 serial ordering
 * Kafka 수준의 broker-managed consumer group 구현
 * shard owner 장애/전환 중에도 지연 없이 유지되는 strict ordering
 * 같은 routing epoch 안에서 단순 shard-count 변경
@@ -77,7 +79,7 @@ Redis Stream은 Kafka처럼 broker가 partition assignment와 rebalance를 관�
 ```text
 Producer
   -> stream metadata cache 조회
-  -> partition key hash
+  -> routing key hash
   -> stream:{version}:{shardIndex}
   -> XADD IDMP producerName idempotencyKey
 
@@ -86,9 +88,11 @@ Runtime Instance
   -> active member snapshot 조회
   -> Rendezvous Hashing으로 shard owner 계산
   -> 자신이 owner로 계산한 shard lease 획득
-  -> shard별 단일 worker로 XREADGROUP
-  -> handler 정상 처리
-  -> XACK
+  -> shard별 fetch loop로 XREADGROUP
+  -> orderingKey별 lane scheduler에 enqueue
+  -> 같은 key는 순차, 다른 key는 병렬 handler 실행
+  -> 처리 완료 표시
+  -> shard offset frontier에 도달한 message만 XACK
 ```
 
 핵심 정책:
@@ -97,9 +101,11 @@ Runtime Instance
 * 모든 instance는 같은 metadata snapshot으로 assignment를 독립 계산한다.
 * assignment algorithm은 deterministic 해야 한다.
 * 하나의 shard는 하나의 runtime instance만 lease owner가 될 수 있다.
-* shard owner instance 내부에서도 하나의 shard는 하나의 worker thread만 읽는다.
-* 정상 처리 경로의 순서 보장은 shard 단위로만 제공한다.
-* owner 장애/전환 중 strict ordering은 `min-idle-time` 만큼 shard 처리를 멈추는 방식으로만 지킬 수 있다.
+* shard owner instance 내부에서 하나의 shard는 하나의 fetch loop만 `XREADGROUP`을 수행한다.
+* handler 실행은 `orderingKey`별 lane scheduler를 통해 병렬화한다.
+* 정상 처리 경로의 순서 보장은 key 단위로 제공한다.
+* 같은 key의 message가 shard scale-out 중 서로 다른 shard version에 걸쳐 존재할 수 있으면 migration fence를 통해 이전 version의 해당 key 처리를 끝낸 뒤 새 version 처리를 시작한다.
+* owner 장애/전환 중 strict key ordering은 `min-idle-time` 만큼 해당 key 또는 shard의 신규 실행을 멈추는 방식으로만 지킬 수 있다.
 * 실제 read 권한은 shard lease로 fencing한다.
 * consumer는 `NOACK`을 사용하지 않는다.
 
@@ -119,13 +125,16 @@ stream_metadata
   routing_epoch
   shard_count
   partition_key_schema
+  ordering_key_schema
   partition_hash_algorithm
   partition_hash_seed
   assignment_algorithm
   assignment_hash_seed
   stream_key_format
   metadata_version
-  state          # ACTIVE, DRAINING, DEPRECATED
+  state          # ACTIVE, MIGRATING, DRAINING, DEPRECATED
+  accepts_writes # true/false
+  accepts_reads  # true/false
   created_at
   updated_at
 ```
@@ -134,12 +143,13 @@ stream_metadata
 
 * `shard_count`
 * `partition_key_schema`
+* `ordering_key_schema`
 * `partition_hash_algorithm`
 * `partition_hash_seed`
 * `assignment_algorithm`
 * `assignment_hash_seed`
 
-위 값이 바뀌면 같은 partition key가 다른 shard 또는 다른 owner로 계산될 수 있다.
+위 값이 바뀌면 같은 routing key 또는 ordering key가 다른 shard 또는 다른 owner로 계산될 수 있다.
 따라서 같은 `stream_prefix + stream_version + routing_epoch` 안에서는 바꾸지 않는다.
 변경이 필요하면 새 `stream_version` 또는 새 `routing_epoch`을 만들고 online migration으로 전환한다.
 
@@ -157,10 +167,20 @@ metadata 조회 정책:
 
 ```text
 metadata = metadataCache.get(streamPrefix, streamVersion, routingEpoch)
-partitionKey = partitionKeyExtractor(message, metadata.partitionKeySchema)
-shardIndex = hash(metadata.partitionHashAlgorithm, metadata.partitionHashSeed, partitionKey) % metadata.shardCount
+routingKey = partitionKeyExtractor(message, metadata.partitionKeySchema)
+orderingKey = orderingKeyExtractor(message, metadata.orderingKeySchema)
+shardIndex = hash(metadata.partitionHashAlgorithm, metadata.partitionHashSeed, routingKey) % metadata.shardCount
 streamKey = format(metadata.streamKeyFormat, streamPrefix, streamVersion, shardIndex)
 ```
+
+기본 정책은 `routingKey == orderingKey`이다.
+그래야 같은 key의 모든 message가 같은 routing epoch 안에서 항상 같은 shard에 들어가고, shard owner 하나가 그 key의 lane 순서를 통제할 수 있다.
+
+`routingKey`와 `orderingKey`를 다르게 둘 수는 있지만, 이 경우 다음 제약을 반드시 만족해야 한다.
+
+* 같은 `orderingKey`가 동시에 여러 shard에 흩어질 수 있으면 key 순서 보장을 잃는다.
+* fanout이나 composite routing이 필요하면 `routingKey = orderingKey`를 유지하고 handler 내부 병렬화로 해결한다.
+* 불가피하게 다르게 써야 한다면 metadata에 `ordering_key_schema`와 `partition_key_schema`를 모두 저장하고, migration 시 key fence를 사용한다.
 
 권장 hash algorithm:
 
@@ -173,6 +193,7 @@ message에는 routing metadata를 넣는다.
 ```json
 {
   "partitionKey": "user-123",
+  "orderingKey": "user-123",
   "streamPrefix": "notification",
   "streamVersion": "v1",
   "routingEpoch": 1,
@@ -185,6 +206,7 @@ message에는 routing metadata를 넣는다.
 ```
 
 순서 보장이 필요한 단위가 있다면 그 값을 partition key로 사용한다.
+일반적으로 이 값이 `orderingKey`도 된다.
 
 예:
 
@@ -192,6 +214,103 @@ message에는 routing metadata를 넣는다.
 * orderId
 * aggregateId
 * brandId + userId
+
+### 6.1 Key Ordered Parallel Processing
+
+Kafka의 일반 consumer는 partition 내부 offset 순서대로 처리하므로 한 message가 느리면 같은 partition 뒤의 다른 key까지 막힌다.
+Confluent Parallel Consumer의 `KEY` ordering 모델은 같은 key만 순차 처리하고 다른 key는 동시에 처리해 이 head-of-line blocking을 줄인다.
+이 모듈도 shard 내부 handler 실행은 같은 모델을 따른다.
+
+보장:
+
+* 같은 `streamPrefix + streamVersion + routingEpoch + orderingKey`의 message는 Redis stream id 순서대로 handler가 시작되고 완료된다.
+* 서로 다른 `orderingKey`는 같은 shard 안에서도 병렬 처리할 수 있다.
+* Redis `XACK`는 처리 완료 여부와 shard offset frontier를 기준으로 안전하게 수행한다.
+* 처리 실패 또는 retry 중인 key는 그 key lane만 멈추고, 다른 key lane은 계속 처리한다.
+
+스케줄러 모델:
+
+```text
+Shard fetch loop
+  -> XREADGROUP로 message batch 획득
+  -> orderingKey 추출
+  -> keyLane[orderingKey] queue에 stream id 순서대로 enqueue
+  -> idle lane만 executor에 submit
+
+Key lane worker
+  -> lane head message 처리
+  -> 성공 시 processed marker 기록
+  -> 실패 시 retry/DLQ 정책 적용
+  -> 같은 lane의 다음 message 처리
+```
+
+ack frontier:
+
+* Redis Stream은 Kafka처럼 임의 offset commit map을 제공하지 않는다.
+* 따라서 message별 처리 완료 상태를 별도 processing state에 기록한다.
+* shard별로 `lastAckedStreamId` 이후 연속으로 처리 완료된 stream id만 `XACK`한다.
+* 중간 stream id가 실패/진행 중이면 그 뒤 message가 다른 key에서 성공했더라도 ACK를 보류하거나, 재처리 허용 정책을 명시적으로 선택한다.
+* ACK 보류가 길어질 수 있으므로 processed marker는 idempotency store와 같은 retention 정책을 가져야 한다.
+
+이 방식의 tradeoff:
+
+* 같은 shard 안에서 key 단위 병렬 처리량을 얻는다.
+* 느린 key 하나가 다른 key의 handler 실행은 막지 않는다.
+* 다만 Redis PEL에는 ACK되지 않은 뒤쪽 message가 남을 수 있어 장애 후 replay가 증가할 수 있다.
+* replay side effect는 idempotency key와 processed marker로 막는다.
+
+### 6.2 Ordering Key와 Shard Scale-Out
+
+shard count 변경은 같은 routing epoch에서 `hash(key) % shardCount`만 바꾸면 안 된다.
+그 순간 같은 key의 이전 message는 old shard에, 이후 message는 new shard에 들어갈 수 있고 두 shard owner가 동시에 처리하면 key 순서가 깨진다.
+
+따라서 shard scale-out은 새 routing epoch 또는 새 stream version으로 수행한다.
+
+```text
+v1 epoch 1: shardCount = 6
+v2 epoch 2: shardCount = 12
+```
+
+online migration 원칙:
+
+* producer는 metadata의 active write version으로만 새 message를 쓴다.
+* consumer는 old/new read version을 동시에 읽을 수 있다.
+* 같은 `orderingKey`에 대해서는 old version의 pending/in-flight/ack frontier가 닫히기 전까지 new version의 같은 key lane을 열지 않는다.
+* 이 key fence는 전체 backlog 0을 기다리지 않고 key별로만 해제된다.
+* old version에 더 이상 쓰지 않는다는 write fence가 먼저 선행되어야 한다.
+
+key fence 상태:
+
+```text
+redis-stream:key-fence:{streamPrefix}:{consumerGroup}:{orderingKey}
+```
+
+값:
+
+```json
+{
+  "orderingKey": "user-123",
+  "fromVersion": "v1",
+  "fromRoutingEpoch": 1,
+  "toVersion": "v2",
+  "toRoutingEpoch": 2,
+  "state": "OLD_OPEN | OLD_DRAINING | NEW_OPEN",
+  "ownerLeaseToken": "...",
+  "updatedAt": "2026-05-01T10:00:20Z"
+}
+```
+
+fence 적용:
+
+1. producer write target을 `v2`로 전환한다.
+2. consumer는 `v1`과 `v2`를 dual-read한다.
+3. scheduler가 `v2` message를 만나면 해당 `orderingKey`의 fence를 확인한다.
+4. 같은 key의 `v1` lane에 pending/in-flight message가 있으면 `v2` lane을 대기시킨다.
+5. `v1` lane이 비고 `lastAckedStreamId`가 해당 key의 old tail 이상이면 fence를 `NEW_OPEN`으로 바꾼다.
+6. 이후 같은 key의 `v2` message 처리를 시작한다.
+
+이 방식은 전체 shard backlog가 0이 될 때까지 기다리지 않는다.
+활성 key별로만 old tail을 닫기 때문에 서비스는 계속 produce/consume할 수 있고, key 간 병렬성도 유지된다.
 
 ---
 
@@ -1104,16 +1223,18 @@ renew-interval <= lease-ttl / 3
 
 ## 13. Worker Thread Model
 
-`active-threads`는 instance 하나가 Redis Stream consume에 사용할 최대 worker 수이다.
+`active-threads`는 instance 하나가 Redis Stream handler 실행에 사용할 최대 worker 수이다.
+Redis에서 message를 가져오는 fetch loop와 handler executor를 분리한다.
 
 규칙:
 
-* instance가 shard를 하나도 받지 않으면 worker를 만들지 않는다.
-* instance가 shard를 받으면 최대 `active-threads`개 worker를 만든다.
-* 하나의 shard는 정확히 하나의 worker에만 배정한다.
-* 한 worker는 여러 shard를 순차적으로 읽을 수 있다.
-* `active-threads > assignedShardCount`이면 남는 worker는 만들지 않는다.
-* shard 하나에 worker를 2개 이상 붙이지 않는다.
+* instance가 shard를 하나도 받지 않으면 shard fetch loop를 만들지 않는다.
+* 하나의 shard는 정확히 하나의 fetch loop만 가진다.
+* fetch loop는 `XREADGROUP`과 lease 검증만 담당하고 handler를 직접 오래 붙잡지 않는다.
+* handler executor는 최대 `active-threads`개 worker를 가진다.
+* 같은 `orderingKey` lane은 동시에 하나의 handler만 실행한다.
+* 서로 다른 `orderingKey` lane은 같은 shard 안에서도 병렬 실행할 수 있다.
+* `active-threads`는 local-only 설정이며 shard owner 계산에는 영향을 주지 않는다.
 
 예:
 
@@ -1121,24 +1242,29 @@ renew-interval <= lease-ttl / 3
 assigned shards = 6, 7, 8, 9
 active-threads = 2
 
-shard 6 -> worker-0
-shard 7 -> worker-0
-shard 8 -> worker-1
-shard 9 -> worker-1
+shard 6 -> fetch-loop-6
+shard 7 -> fetch-loop-7
+shard 8 -> fetch-loop-8
+shard 9 -> fetch-loop-9
+
+handler-executor worker-0 -> key lanes from any owned shard
+handler-executor worker-1 -> key lanes from any owned shard
 ```
 
 순서 보장:
 
-* 같은 shard의 message는 같은 worker에서 순차 처리한다.
+* 같은 `orderingKey`의 message는 같은 lane에서 stream id 순서대로 처리한다.
+* 다른 `orderingKey`의 message는 병렬 처리할 수 있다.
 * shard 간 순서는 보장하지 않는다.
-* 한 shard의 handler를 병렬 실행하지 않는다.
-* 이 순서 보장은 owner가 정상적으로 살아 있고 shard handoff가 graceful하게 끝나는 경로를 기준으로 한다.
-* owner 장애나 forced handoff 중에는 Redis PEL reclaim의 `min-idle-time` 때문에 strict ordering과 빠른 failover를 동시에 보장할 수 없다.
+* key 순서 보장은 owner가 정상적으로 살아 있고 shard handoff가 graceful하게 끝나는 경로를 기준으로 한다.
+* owner 장애나 forced handoff 중에는 Redis PEL reclaim의 `min-idle-time` 때문에 strict key ordering과 빠른 failover를 동시에 보장할 수 없다.
 
 운영 주의:
 
-* worker 하나가 여러 shard를 맡으면 한 shard의 느린 처리가 같은 worker의 다른 shard에도 영향을 줄 수 있다.
-* 순서 보장을 유지하면서 격리성을 높이려면 `active-threads >= assignedShardCount`가 되도록 운영한다.
+* hot key 하나는 여전히 하나의 lane에서만 처리되므로 해당 key 처리량은 단일 handler 처리량에 묶인다.
+* key cardinality가 낮으면 `active-threads`를 늘려도 처리량이 크게 늘지 않는다.
+* `max-inflight-per-shard`와 `max-inflight-per-key`로 메모리와 Redis PEL 증가를 제한한다.
+* ACK frontier가 막히면 read backpressure를 걸어 처리 완료됐지만 ACK 보류 중인 message가 무한히 쌓이지 않게 한다.
 
 ---
 
@@ -1149,31 +1275,33 @@ Redis Stream은 consumer가 죽으면 message를 PEL에 남긴다.
 
 순서 보장 정책:
 
-* pending recovery도 shard owner의 단일 worker만 수행한다.
-* recovery 중에는 해당 shard의 신규 message read를 멈춘다.
-* pending message를 먼저 처리하고 ACK한 뒤 신규 message read를 재개한다.
-* 처리 실패 message를 건너뛰고 뒤 message를 먼저 ACK하면 shard 내부 순서 보장이 깨질 수 있다.
-* max attempts 초과로 DLQ 이동 후 ACK하는 것은 순서 보장을 포기하고 운영 보상 처리로 넘기는 명시적 정책이다.
+* pending recovery는 shard owner만 수행한다.
+* recovery 중에는 해당 shard의 신규 `XREADGROUP ... >` 호출을 멈춘다.
+* pending message를 stream id 순서로 조회하고 `orderingKey`별 lane에 복원한다.
+* 같은 key의 pending message를 처리하기 전에는 그 key의 신규 message를 실행하지 않는다.
+* 다른 key의 pending recovery가 막혀도 key fence와 ack frontier 조건을 만족하는 key는 진행할 수 있다.
+* 처리 실패 message를 건너뛰고 같은 key의 뒤 message를 먼저 실행하면 key 순서 보장이 깨진다.
+* max attempts 초과로 DLQ 이동 후 ACK하는 것은 해당 message에 대한 순서 보장을 포기하고 운영 보상 처리로 넘기는 명시적 정책이다.
 
 owner 전환 중 순서보장 한계:
 
 * Redis Stream consumer group은 pending message를 PEL에 남기지만, 다른 consumer가 즉시 가져가도록 보장하지 않는다.
 * `XAUTOCLAIM`은 `min-idle-time`을 만족한 pending message만 reclaim한다.
 * consumer-1이 shard message `m1`을 읽고 ACK 전에 멈춘 직후 consumer-2가 shard owner가 되면, consumer-2는 `m1`의 idle time이 충분히 쌓이기 전까지 reclaim하지 못할 수 있다.
-* 이 상태에서 consumer-2가 신규 message `m2`를 `XREADGROUP ... >`로 읽으면 `m1 -> m2` 순서가 깨질 수 있다.
-* 따라서 strict shard ordering 모드에서는 pending recovery가 완료되기 전까지 신규 read를 시작하지 않는다.
-* 이 선택은 순서를 지키는 대신 shard failover 지연을 `min-idle-time` 이상 허용한다는 뜻이다.
+* 이 상태에서 consumer-2가 같은 key의 신규 message `m2`를 실행하면 `m1 -> m2` 순서가 깨질 수 있다.
+* 따라서 strict key ordering 모드에서는 해당 key의 pending recovery가 완료되기 전까지 같은 key의 신규 lane을 열지 않는다.
+* 이 선택은 순서를 지키는 대신 해당 key의 failover 지연을 `min-idle-time` 이상 허용한다는 뜻이다.
 
 운영 모드:
 
 ```text
 STRICT_ORDER
-  pending recovery 완료 전 신규 read 금지
-  owner 장애 시 min-idle-time만큼 shard 처리 지연 가능
+  같은 key의 pending recovery 완료 전 신규 key lane 실행 금지
+  owner 장애 시 min-idle-time만큼 해당 key 처리 지연 가능
 
 FAST_FAILOVER
-  pending reclaim 가능 여부와 무관하게 신규 read 재개 가능
-  shard 내부 순서 보장은 포기하고 idempotency/retry/DLQ로 보정
+  pending reclaim 가능 여부와 무관하게 신규 key lane 실행 가능
+  key 순서 보장은 포기하고 idempotency/retry/DLQ로 보정
 ```
 
 Recovery:
@@ -1187,6 +1315,7 @@ XAUTOCLAIM {streamKey} {groupName} {consumerName} {minIdleTime} {startId} COUNT 
 * `XAUTOCLAIM`은 반환된 next start id로 반복 호출한다.
 * next start id가 `0-0`이 될 때까지 한 recovery pass를 계속한다.
 * shard owner worker만 해당 shard의 pending message를 reclaim한다.
+* recovery된 message도 일반 message와 같은 `orderingKey` lane scheduler를 통과한다.
 * retry count가 `max-attempts`를 넘으면 DLQ로 이동한다.
 * DLQ 이동 후 원본 message는 ACK한다.
 * 이미 metadata store에 `PROCESSED`로 기록된 message는 handler를 다시 실행하지 않고 ACK한다.
@@ -1233,11 +1362,29 @@ stream_message_processing
   group_name
   stream_key
   message_id
+  ordering_key
   idempotency_key
   state          # CLAIMED, PROCESSED, FAILED, DLQ
   owner_instance_id
   lease_token
   attempt_count
+  updated_at
+
+stream_shard_ack_frontier
+  group_name
+  stream_key
+  last_acked_stream_id
+  updated_at
+
+stream_key_migration_fence
+  group_name
+  stream_prefix
+  ordering_key
+  from_stream_version
+  from_routing_epoch
+  to_stream_version
+  to_routing_epoch
+  state          # OLD_OPEN, OLD_DRAINING, NEW_OPEN
   updated_at
 ```
 
@@ -1247,6 +1394,8 @@ stream_message_processing
 * `stream_runtime_instance(consumer_group, instance_id)` unique
 * `stream_message_processing(idempotency_key)` unique
 * 또는 `stream_message_processing(group_name, stream_key, message_id)` unique
+* `stream_shard_ack_frontier(group_name, stream_key)` unique
+* `stream_key_migration_fence(group_name, stream_prefix, ordering_key, from_stream_version, from_routing_epoch, to_stream_version, to_routing_epoch)` unique
 
 retention:
 
@@ -1268,7 +1417,7 @@ retention:
 * producer는 metadata store의 active routing rule을 보고 message 단위로 routing version을 기록한다.
 * consumer는 message에 기록된 `streamVersion`, `routingEpoch`, `metadataVersion`을 기준으로 처리한다.
 * consumer는 active version만 읽지 않고, migration 중인 source/target version을 함께 읽을 수 있어야 한다.
-* migration 완료 조건은 전체 lag 0 대기가 아니라, routing cutover와 안전한 retention window 기준으로 판단한다.
+* key ordering이 필요한 stream의 migration 완료 조건은 전체 lag 0 대기가 아니라 key별 old fence 해제와 안전한 retention window 기준으로 판단한다.
 
 예:
 
@@ -1295,17 +1444,18 @@ online 전환 절차:
 3. consumer가 v1/v2를 함께 읽을 수 있도록 먼저 배포한다.
 4. producer가 metadata store의 routing rule을 refresh해 신규 write부터 v2 routing을 사용할 수 있게 한다.
 5. cutover 이후 신규 message는 v2에 기록하되, 기존 v1 message 처리는 계속 진행한다.
-6. v1은 신규 write 대상에서 제외하지만, retention window 동안 consumer read 대상에는 남긴다.
-7. v1 lag, pending, DLQ를 관측해 운영자가 안전하다고 판단하면 deprecated 처리한다.
+6. consumer는 같은 `orderingKey`의 v1 lane이 닫히기 전까지 v2 lane 실행을 대기시킨다.
+7. v1은 신규 write 대상에서 제외하지만, retention window 동안 consumer read 대상에는 남긴다.
+8. v1 key fence, pending, DLQ를 관측해 운영자가 안전하다고 판단하면 deprecated 처리한다.
 
 consumer는 message의 `streamVersion`, `routingEpoch`, `metadataVersion`으로 해당 metadata snapshot을 조회한다.
 active stream version만 기준으로 검증하지 않는다.
 
 주의:
 
-* 이 방식은 신규 write 다운타임을 없애지만, 같은 partition key의 v1/v2 메시지가 동시에 남을 수 있다.
-* strict key ordering이 필요한 경우에는 key 단위 cutover fence, routing registry, 또는 key별 migration state가 추가로 필요하다.
-* 이 추가 설계 없이는 shard scale out/in 중 key 단위 strict ordering을 보장한다고 말하면 안 된다.
+* 이 방식은 신규 write 다운타임을 없애지만, 같은 ordering key의 v1/v2 message가 동시에 남을 수 있다.
+* strict key ordering이 필요한 stream은 key 단위 cutover fence 없이 v2 message를 즉시 실행하면 안 된다.
+* fence store 장애 시에는 신규 write는 계속 가능하지만, 해당 key의 new-version consume은 보수적으로 멈춘다.
 
 ---
 
@@ -1354,7 +1504,10 @@ redis-stream:
     batch-size: 50
     block-timeout: 2s
     ack-mode: ACK_AFTER_SUCCESS
-    ordering: STRICT_ORDER
+    ordering: KEY
+    ordering-mode: STRICT_ORDER
+    max-inflight-per-shard: 1000
+    max-inflight-per-key: 1
 
   producer:
     idempotency:
@@ -1378,7 +1531,11 @@ redis-stream:
     min-idle-time: 60s
     scan-interval: 30s
     batch-size: 100
-    block-new-read-until-recovered: true
+    block-same-key-until-recovered: true
+
+  migration:
+    key-fence-enabled: true
+    dual-read-enabled: true
 
   retry:
     max-attempts: 5
@@ -1406,6 +1563,12 @@ redis-stream:
 * `redis_stream_shard_acquire_retry_total`
 * `redis_stream_shard_handoff_duration`
 * `redis_stream_assignment_snapshot_version`
+* `redis_stream_key_lanes_active`
+* `redis_stream_key_lanes_blocked`
+* `redis_stream_key_lane_queue_size`
+* `redis_stream_ack_frontier_gap`
+* `redis_stream_key_fence_waiting`
+* `redis_stream_key_fence_opened_total`
 * `redis_stream_messages_read_total`
 * `redis_stream_messages_ack_total`
 * `redis_stream_messages_failed_total`
@@ -1455,15 +1618,15 @@ redis-stream:
 * 현재 owner를 보려면 각 instance의 계산 결과 또는 lease 상태를 봐야 한다.
 * 완벽한 균등 분배는 보장하지 않는다.
 * Redis PEL reclaim은 `min-idle-time` 제약이 있어 owner 장애 직후 pending message를 즉시 회수할 수 없다.
-* strict shard ordering을 선택하면 owner 전환 시 shard 처리가 지연될 수 있다.
-* 빠른 failover를 선택하면 shard 내부 순서 보장을 포기해야 한다.
+* strict key ordering을 선택하면 owner 전환 시 해당 key 처리가 지연될 수 있다.
+* 빠른 failover를 선택하면 key 순서 보장을 포기해야 한다.
 
 결론:
 
 MVP와 production baseline은 Coordinatorless 설계를 선택한다.
 균등 분배 문제가 실제로 관측되면 bounded-load rendezvous hashing을 추가한다.
 중앙 Coordinator는 마지막 선택지로 둔다.
-다만 Redis Stream PEL reclaim 특성상 coordinatorless cooperative rebalance도 장애 전환 중 strict ordering을 즉시 보장하지는 못한다.
+다만 Redis Stream PEL reclaim 특성상 coordinatorless cooperative rebalance도 장애 전환 중 strict key ordering을 즉시 보장하지는 못한다.
 
 ---
 
@@ -1474,12 +1637,14 @@ MVP와 production baseline은 Coordinatorless 설계를 선택한다.
 * stream metadata 관리
 * producer shard routing
 * online shard scale out/in을 위한 stream version 또는 routing epoch metadata
+* key ordered lane scheduler
+* shard scale-out 중 key fence 기반 online migration
 * XADD IDMP producer idempotency
 * consumer group initialization
 * runtime instance registry
 * Rendezvous Hashing 기반 coordinatorless shard assignment
 * shard lease fencing
-* 정상 처리 경로의 shard 단위 순서 보장
+* 정상 처리 경로의 key 단위 순서 보장
 * XREADGROUP + ACK_AFTER_SUCCESS
 * XAUTOCLAIM pending recovery
 * DLQ
