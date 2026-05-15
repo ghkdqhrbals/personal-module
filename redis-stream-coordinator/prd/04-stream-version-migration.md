@@ -59,7 +59,6 @@ POST /coord/v1/streams/{streamPrefix}/groups/{consumerGroup}
   "hashAlgorithm": "murmur3",
   "hashSeed": "default",
   "versionPolicy": "AUTO_INCREMENT",
-  "assignmentStrategy": "STICKY_PARTITION",
   "idempotencyKey": "summary-create-20260515-001"
 }
 ```

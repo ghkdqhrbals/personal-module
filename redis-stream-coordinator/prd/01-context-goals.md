@@ -53,7 +53,6 @@ Redis에 맞게 달라지는 점:
 * 외부 side effect까지 포함한 절대적 exactly-once
 * 같은 stream version 안에서 shard count만 바꾸는 in-place resharding
 * 여러 active coordinator 동시 허용
-* MVP에서 client-side assignor delegation 필수 구현
 
 ## Assumptions
 

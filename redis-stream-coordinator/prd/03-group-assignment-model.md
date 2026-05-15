@@ -12,7 +12,6 @@
   "state": "STABLE",
   "activeWriteVersion": "v2",
   "readableVersions": ["v1", "v2"],
-  "assignmentStrategy": "STICKY_PARTITION",
   "updatedAt": "2026-05-15T10:00:00Z"
 }
 ```
@@ -26,7 +25,6 @@ Trigger:
 * member metadata 변경
 * readable stream version 변경
 * Coordinator Admin API로 요청된 shard count migration 시작/완료
-* assignment strategy 변경
 * coordinator가 member를 fenced 처리
 
 ## Member Metadata
@@ -38,7 +36,6 @@ Trigger:
   "memberRunId": "018f8d27-8bdb-7dc8-8db4-141575e8749e",
   "state": "ACTIVE",
   "memberEpoch": 11,
-  "supportedAssignmentStrategies": ["STICKY_PARTITION"],
   "metadataVersion": 8,
   "maxConcurrency": 12,
   "currentAssignment": [
@@ -118,9 +115,9 @@ Member 제거는 두 경로로 진행된다.
 
 `EXPIRED` member metadata는 즉시 삭제하지 않는다. coordinator failover와 운영 디버깅을 위해 `metadata-retention` 동안 tombstone으로 보관하고, current assignment가 비어 있거나 lease TTL이 지난 뒤 삭제한다.
 
-## Assignment Strategy
+## Sticky Partition Assignment
 
-MVP 기본은 `STICKY_PARTITION`이다. member의 `supportedAssignmentStrategies`는 협상용 복수 후보가 아니라 capability 확인 필드로 사용한다. MVP member는 시작부터 `["STICKY_PARTITION"]`을 보고해야 하며, coordinator는 이 값을 지원하지 않는 member에게 shard를 assign하지 않는다.
+이 설계는 sticky partition assignment를 고정 전제로 둔다. member가 선택하거나 heartbeat로 보고할 값이 아니다.
 
 목표:
 
@@ -129,4 +126,4 @@ MVP 기본은 `STICKY_PARTITION`이다. member의 `supportedAssignmentStrategies
 * revoke가 필요한 shard만 이동한다.
 * `ACTIVE`와 `DRAINING` readable version을 모두 assignment 대상으로 포함한다.
 
-`STICKY_PARTITION`은 현재 target assignment를 입력으로 사용해 movement cost를 최소화한다. scale-out에서는 신규 member capacity만큼 일부 shard만 이동하고, scale-in에서는 사라지는 member의 shard만 살아 있는 member에게 재분배한다.
+Sticky partition assignment는 현재 target assignment를 입력으로 사용해 movement cost를 최소화한다. scale-out에서는 신규 member capacity만큼 일부 shard만 이동하고, scale-in에서는 사라지는 member의 shard만 살아 있는 member에게 재분배한다.

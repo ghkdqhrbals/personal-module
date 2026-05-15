@@ -45,7 +45,6 @@ redis-stream-coordinator:
     lease-ttl: 10s
     lease-renew-interval: 3s
     rebalance-timeout: 60s
-    assignment-strategy: STICKY_PARTITION
     min-shard-count: 1
     max-shard-count: 128
     version-policy: AUTO_INCREMENT

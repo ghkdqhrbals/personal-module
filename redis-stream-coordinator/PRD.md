@@ -28,7 +28,7 @@ Spring Boot/Kotlin 공통 모듈로 Redis Stream shard ownership을 중앙 coord
 * 중앙 Group Coordinator를 둔다.
 * coordinator는 Redis-backed lease로 active coordinator를 하나만 유지한다.
 * member identity는 member runtime이 직접 만든 UUID를 사용하되, coordinator가 등록/epoch/fencing 상태를 관리한다.
-* shard assignment는 coordinator가 `STICKY_PARTITION` 전략으로 계산하고 target assignment로 저장한다.
+* shard assignment는 sticky partition 방식으로 계산하고 target assignment로 저장한다.
 * member는 heartbeat request로 current assignment와 revoke ack를 보고하고, coordinator는 heartbeat response로 revoke/assign/fence 명령을 내려보낸다.
 * rebalance는 group-wide stop-the-world barrier가 아니라 member별 reconciliation loop로 진행한다.
 * shard count 변경은 member startup YAML sync가 아니라 Coordinator Admin API로 요청하고, coordinator가 next stream version migration으로 처리한다.

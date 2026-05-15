@@ -11,7 +11,7 @@ Included:
 * member scale-out/scale-in sequence
 * idle member expiration and cleanup
 * group epoch, assignment epoch, member epoch
-* server-side `STICKY_PARTITION` assignor
+* server-side sticky partition assignment
 * target assignment store
 * current assignment reporting
 * revoke before assign dependency handling
@@ -26,10 +26,8 @@ Excluded:
 
 * Kafka protocol compatibility
 * external coordinator service deployment
-* client-side assignor delegation
 * multiple concurrent migrations per stream prefix
 * admin UI
-* bounded-load assignor
 * hot shard auto split
 * Redis Cluster resharding automation
 * exactly-once external side effects
@@ -78,7 +76,6 @@ Costs:
 
 * coordinator worker를 embedded로 둘지, 별도 service로 분리할지?
 * member UUID를 member runtime이 직접 생성하는 방식을 유지할지, coordinator가 registration ack와 함께 부여할지?
-* target assignment assignor는 `STICKY_PARTITION`으로 충분한지?
 * member capacity는 max-concurrency만 볼지, lag/CPU 같은 dynamic signal도 반영할지?
 * Redis key update는 Lua CAS만 쓸지, Redis Streams event log를 둘지?
 * Admin API 인증/인가를 service auth로 둘지 별도 operator token으로 둘지?
@@ -88,7 +85,7 @@ Costs:
 ## Decision Needed
 
 * MVP coordinator mode: `EMBEDDED_LEASED`
-* MVP assignor: `STICKY_PARTITION`
+* MVP assignment: sticky partition 고정
 * MVP member identity: member-runtime-generated UUID
 * MVP state store: Redis HASH/JSON + Lua CAS
 * MVP rebalance style: coordinator-driven incremental reconciliation

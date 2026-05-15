@@ -106,7 +106,7 @@ steps:
 
 Member와 coordinator 사이의 제어면은 heartbeat 하나로 통일한다. member가 주기적으로 heartbeat를 보내면 coordinator는 그 응답에서 member가 지금 수행해야 할 명령을 내려보낸다.
 
-* request: `memberId`, `memberEpoch`, `metadataVersion`, `supportedAssignmentStrategies`, `currentAssignment`, `revocations`, `capacity`
+* request: `memberId`, `memberEpoch`, `metadataVersion`, `currentAssignment`, `revocations`, `capacity`
 * response: `status`, `groupEpoch`, `assignmentEpoch`, `memberEpoch`, `metadataVersion`, `commands`, `targetAssignment`
 * command는 별도 polling loop로 가져오지 않는다. 다음 heartbeat 응답이 최신 명령이다.
 * coordinator failover 중 heartbeat 응답을 만들 수 없으면 member는 기존 lease가 유효한 shard만 계속 처리하고 신규 assign은 받지 않는다.
@@ -124,7 +124,6 @@ Heartbeat request 예시:
   "memberState": "ACTIVE",
   "memberEpoch": 11,
   "metadataVersion": 8,
-  "supportedAssignmentStrategies": ["STICKY_PARTITION"],
   "capacity": {
     "maxConcurrency": 12,
     "availableConcurrency": 8
@@ -189,7 +188,6 @@ Heartbeat response 예시:
 | `memberState` | yes | member lifecycle 상태. |
 | `memberEpoch` | yes | member가 현재 적용 중인 assignment epoch. stale 값이면 fenced 또는 retry 대상이다. |
 | `metadataVersion` | yes | member가 캐시한 group metadata version. 낮으면 response에 metadata sync 명령이 내려간다. |
-| `supportedAssignmentStrategies` | yes | MVP에서는 반드시 `["STICKY_PARTITION"]`이다. 다른 값만 보내면 `UNSUPPORTED_ASSIGNMENT_STRATEGY`로 거절한다. |
 | `capacity` | yes | assignment 계산에 사용할 member 처리 용량. `maxConcurrency`는 이 member가 동시에 소유할 shard 상한이다. |
 | `currentAssignment` | yes | member가 실제로 lease를 유지하며 처리 중인 shard 목록. |
 | `revocations` | yes | revoke 명령을 받은 shard의 drain/ack 진행 상태. |
@@ -209,12 +207,6 @@ Heartbeat response 예시:
 | `commands` | yes | 이번 heartbeat 응답에서 수행할 revoke/assign/fence 명령 목록. 없으면 빈 배열이다. |
 
 ### Heartbeat Enums
-
-`AssignmentStrategy`:
-
-| Value | Role |
-| --- | --- |
-| `STICKY_PARTITION` | MVP의 유일한 assignment strategy. 기존 owner를 최대한 유지하고, 바뀐 shard만 revoke/assign한다. |
 
 `MemberState`:
 
@@ -245,7 +237,6 @@ Heartbeat response 예시:
 | `COORDINATOR_NOT_ACTIVE` | 응답한 coordinator가 active lease를 잃었다. member는 다른 active coordinator를 찾아 재시도한다. |
 | `UNKNOWN_MEMBER` | coordinator가 member를 모른다. member는 registration heartbeat를 다시 보낸다. |
 | `STALE_MEMBER_EPOCH` | member epoch이 coordinator state보다 낮다. response의 member epoch과 commands를 기준으로 수렴한다. |
-| `UNSUPPORTED_ASSIGNMENT_STRATEGY` | member가 `STICKY_PARTITION`을 지원하지 않는다. coordinator는 assign하지 않는다. |
 | `UNSUPPORTED_PROTOCOL` | heartbeat protocol version이 호환되지 않는다. |
 | `FENCED` | member가 더 이상 read/ack하면 안 된다. 모든 shard worker를 중단한다. |
 
@@ -261,7 +252,7 @@ Heartbeat response 예시:
 
 ## Member Scale-Out Sequence
 
-새 member가 추가되면 coordinator는 `STICKY_PARTITION` 기준으로 필요한 shard만 이동시킨다. 기존 owner가 revoke ack를 보내기 전까지 새 member는 해당 shard를 assign받지 않는다.
+새 member가 추가되면 coordinator는 sticky partition 기준으로 필요한 shard만 이동시킨다. 기존 owner가 revoke ack를 보내기 전까지 새 member는 해당 shard를 assign받지 않는다.
 
 ```mermaid
 sequenceDiagram
@@ -274,10 +265,10 @@ sequenceDiagram
     participant Lease as Shard Lease
 
     N->>N: memberId와 memberRunId 생성
-    N->>C: heartbeat STARTING supported STICKY_PARTITION 보고
+    N->>C: heartbeat STARTING current state 보고
     C->>Store: member N 등록, memberEpoch 부여
     C->>Store: groupEpoch 증가
-    C->>C: STICKY_PARTITION target 재계산
+    C->>C: sticky partition target 재계산
     C-->>A: heartbeat response REVOKE moved shards
     C-->>B: heartbeat response NOOP 또는 REVOKE
     A->>A: 신규 read 중단 후 in-flight drain
@@ -307,7 +298,7 @@ sequenceDiagram
     L->>C: heartbeat LEAVING current assignment 보고
     C->>Store: member L state LEAVING 저장
     C->>Store: groupEpoch 증가
-    C->>C: L 제외하고 STICKY_PARTITION target 재계산
+    C->>C: L 제외하고 sticky partition target 재계산
     C-->>L: heartbeat response REVOKE all owned shards
     L->>L: 신규 read 중단 후 in-flight drain
     L->>Lease: owned shard lease release 또는 renew 중단
