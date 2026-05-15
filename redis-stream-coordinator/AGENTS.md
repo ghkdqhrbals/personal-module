@@ -26,6 +26,15 @@
 * Mermaid diagram은 실제 flow를 설명할 때만 사용한다.
 * KIP-848 용어를 사용할 때는 Redis Stream 대응 용어를 함께 적는다.
 
+## 문서 소유권
+
+* KIP-848 대응 범위와 구현/비구현 목록은 `prd/08-kip848-implementation-coverage.md`에만 둔다.
+* heartbeat request/response와 member lifecycle flow는 `prd/02-coordinator-architecture.md`에만 둔다.
+* group state, epoch, target/current assignment data model은 `prd/03-group-assignment-model.md`에만 둔다.
+* shard scale-out/in, stream version migration, Admin API는 `prd/04-stream-version-migration.md`에만 둔다.
+* metrics, logs, config, Redis key naming은 `prd/06-data-config-observability.md`에만 둔다.
+* 같은 내용을 여러 문서에 복사하지 말고, entrypoint나 다른 문서에서는 링크와 짧은 요약만 둔다.
+
 ## 참고 설계
 
 * KIP-848: <https://cwiki.apache.org/confluence/display/KAFKA/KIP-848%3A+The+Next+Generation+of+the+Consumer+Rebalance+Protocol>

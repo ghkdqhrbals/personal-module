@@ -6,31 +6,6 @@
 
 KIP-848은 기존 Kafka consumer rebalance의 group-wide synchronization barrier를 줄이고, coordinator가 target assignment와 member reconciliation을 관리하는 방향으로 발전했다. Redis Stream에는 Kafka broker coordinator가 없으므로, 동일한 개념을 Redis-backed coordinator로 구현해야 한다.
 
-## KIP-848 Mapping
-
-이 설계에서 가져올 핵심은 client가 각자 owner를 계산하는 구조가 아니라 coordinator가 target assignment를 만들고, member가 heartbeat로 current assignment를 보고하며, coordinator가 revoke/assign dependency를 풀어 수렴시키는 구조이다.
-
-| KIP-848 | Redis Stream Coordinator |
-| --- | --- |
-| Group Coordinator | Redis-backed active coordinator worker |
-| Consumer Group | `{streamPrefix, consumerGroup}` |
-| Member | member runtime이 생성한 UUID `memberId` |
-| Topic Partition | `{streamVersion, shardIndex}` |
-| Group Epoch | group metadata 변경 version |
-| Assignment Epoch | target assignment 계산 기준 epoch |
-| Member Epoch | member가 적용 중인 assignment epoch |
-| Target Assignment | coordinator가 저장한 desired shard ownership |
-| Current Assignment | member가 heartbeat로 보고한 실제 적용 state |
-| ConsumerGroupHeartbeat | member heartbeat request/response command channel |
-
-Redis에 맞게 달라지는 점:
-
-* Kafka broker가 없으므로 active coordinator worker를 Redis lease로 선출한다.
-* Kafka heartbeat RPC는 internal coordinator API 또는 Redis mailbox 기반 request/response로 대체한다.
-* Kafka partition offset fencing은 Redis Stream shard lease와 member epoch 검증으로 대체한다.
-* member id는 coordinator 발급이 아니라 member runtime 직접 UUID 생성으로 시작한다.
-* shard count 변경은 Kafka partition expansion과 다르게 stream version migration으로 처리한다.
-
 ## Goals
 
 * coordinator가 group metadata, target assignment, current assignment를 source of truth로 관리한다.

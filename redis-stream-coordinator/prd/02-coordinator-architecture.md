@@ -206,6 +206,17 @@ Heartbeat response 예시:
 | `targetAssignment` | yes | 이 member가 최종적으로 수렴해야 할 shard 목록. |
 | `commands` | yes | 이번 heartbeat 응답에서 수행할 revoke/assign/fence 명령 목록. 없으면 빈 배열이다. |
 
+### Heartbeat Command Idempotency
+
+Heartbeat response는 네트워크 재시도와 coordinator failover 때문에 같은 command를 다시 보낼 수 있다.
+
+* `commandId`는 group 안에서 유일해야 한다.
+* coordinator는 member의 `lastAppliedCommandId`, `currentAssignment`, `revocations`를 보고 command 적용 여부를 판단한다.
+* member는 같은 `REVOKE`를 다시 받으면 이미 `REVOKING`/`DRAINING`/`REVOKED`인 shard에 대해 no-op으로 처리한다.
+* member는 같은 `ASSIGN`을 다시 받으면 이미 같은 assignment epoch에서 `OWNED`인 shard에 대해 no-op으로 처리한다.
+* `FENCE`는 terminal command이다. member는 모든 shard worker를 멈추고 새 `memberId`로 재등록하기 전까지 read/ack하지 않는다.
+* command는 response의 `memberEpoch`과 `assignmentEpoch`이 member local state와 맞을 때만 적용한다. mismatch는 다음 heartbeat에서 `SYNC_METADATA` 또는 `STALE_MEMBER_EPOCH`로 수렴시킨다.
+
 ### Heartbeat Enums
 
 `MemberState`:
@@ -343,37 +354,6 @@ sequenceDiagram
     A->>A: XAUTOCLAIM pending recovery
     A->>C: heartbeat ACTIVE current assignment 보고
     C->>Store: retention 지난 EXPIRED member metadata 삭제
-```
-
-## Rebalance Sequence
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant C as Coordinator
-    participant A as Member A
-    participant B as Member B
-    participant Store as Redis Store
-    participant Lease as Shard Lease
-
-    A->>C: heartbeat request current assignment 보고
-    B->>C: heartbeat request current assignment 보고
-    C->>Store: heartbeat와 current assignment 저장
-    C->>Store: member metadata 변화 감지
-    C->>Store: groupEpoch 증가
-    C->>C: target assignment 계산
-    C->>Store: assignmentEpoch과 target assignment 저장
-    C-->>A: heartbeat response로 REVOKE 전달
-    A->>A: 대상 shard 신규 read 중단
-    A->>A: in-flight drain
-    A->>Lease: shard lease release 또는 renew 중단
-    A->>C: 다음 heartbeat request로 revoke ack 보고
-    C->>Store: current assignment와 revoke ack 저장
-    C->>Store: revoke ack 확인
-    C-->>B: heartbeat response로 ASSIGN 전달
-    B->>Lease: shard lease 획득
-    B->>B: pending recovery
-    B->>C: 다음 heartbeat request로 current assignment 갱신 보고
 ```
 
 Revoke/assign 규칙:

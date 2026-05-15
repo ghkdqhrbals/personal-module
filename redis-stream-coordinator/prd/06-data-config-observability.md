@@ -83,7 +83,7 @@ redis-stream-coordinator:
 ## Metrics
 
 * `redis_stream_coord_active`
-* `redis_stream_coord_epoch`
+* `redis_stream_coord_coordinator_epoch`
 * `redis_stream_coord_group_epoch`
 * `redis_stream_coord_assignment_epoch`
 * `redis_stream_coord_member_epoch`
@@ -98,6 +98,10 @@ redis-stream-coordinator:
 * `redis_stream_coord_migration_duration`
 * `redis_stream_coord_revoke_pending`
 * `redis_stream_coord_assignment_stuck`
+* `redis_stream_coord_insufficient_capacity`
+* `redis_stream_coord_invariant_violation_total`
+* `redis_stream_coord_metadata_cleanup_total`
+* `redis_stream_coord_heartbeat_protocol_error_total`
 * `redis_stream_owned_shards`
 * `redis_stream_lease_lost_total`
 * `redis_stream_pending_count`
@@ -137,6 +141,8 @@ Structured log fields:
 * member heartbeat expired 급증
 * idle member removal 급증
 * assignment stuck
+* insufficient capacity 지속
+* invariant violation 발생
 * active migration이 migration timeout 초과
 * pending count 또는 lag 지속 증가
 * duplicate processed marker spike

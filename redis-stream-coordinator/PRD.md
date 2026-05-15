@@ -18,6 +18,7 @@
 5. [Processing, Reliability, and Fencing](prd/05-processing-reliability.md)
 6. [Data Model, Configuration, and Observability](prd/06-data-config-observability.md)
 7. [MVP Scope, Tradeoffs, Risks, and Open Questions](prd/07-mvp-risks-open-questions.md)
+8. [KIP-848 Implementation Coverage](prd/08-kip848-implementation-coverage.md)
 
 ## Product Summary
 

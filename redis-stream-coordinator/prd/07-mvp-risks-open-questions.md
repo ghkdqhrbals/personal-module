@@ -72,6 +72,15 @@ Costs:
 * assignment state가 손상되면 수동 복구 runbook이 필요하다.
 * shard count migration 중 old/new key ordering이 깨질 수 있다.
 
+## Maintainability Improvements
+
+* heartbeat schema는 `protocolVersion`으로 관리한다. 호환되지 않는 request/response 변경은 major version bump로 처리하고, optional field 추가만 같은 version에서 허용한다.
+* coordinator event loop에는 invariant checker를 둔다. target assignment 중복 owner, missing owner, stale member epoch, lease owner mismatch를 감지하면 metric과 structured log를 남긴다.
+* metadata cleanup은 별도 maintenance tick에서 수행한다. `EXPIRED` member tombstone, old migration record, processed marker는 retention 기준으로만 삭제한다.
+* Admin API mutation은 idempotency key와 audit log를 필수로 남긴다. 운영자가 누가 언제 group metadata를 바꿨는지 추적할 수 있어야 한다.
+* state transition, sticky assignment, heartbeat command idempotency는 table-driven test와 golden JSON fixture로 관리한다.
+* runbook은 최소 네 가지를 제공한다: active coordinator 없음, stuck revoke, migration drain 지연, assignment invariant violation.
+
 ## Open Questions
 
 * coordinator worker를 embedded로 둘지, 별도 service로 분리할지?
